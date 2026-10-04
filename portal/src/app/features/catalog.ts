@@ -1,117 +1,83 @@
-import { Component, computed, effect, inject, signal } from '@angular/core';
+import { Component, HostListener, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { Api } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
-import { Plan, Product, SavePlan } from '../core/api.models';
+import { Platforms, Product } from '../core/api.models';
 import { I18n, LocalNumberPipe, TranslatePipe } from '../core/i18n.service';
 import { Toasts } from '../core/toast.service';
-import { Modal, PageHead, StateView, StatusBadge, loader } from '../shared/ui';
 import { Icon } from '../shared/icon';
+import { Modal, StateView, loader } from '../shared/ui';
 
+/** Products from the mockup: cards with icon tile, platform chips, plans/licenses counts, status and a row menu. */
 @Component({
   selector: 'app-catalog',
-  imports: [FormsModule, TranslatePipe, LocalNumberPipe, StateView, StatusBadge, Modal, PageHead, Icon],
+  imports: [FormsModule, TranslatePipe, LocalNumberPipe, StateView, Modal, Icon],
   template: `
-    <app-page-head title="products.title" en="Products &amp; Plans Catalog" subtitle="products.sub">
+    <header class="page-head">
+      <div><h1>{{ 'products.title' | t }}</h1><p class="subtitle">{{ 'products.sub' | t }}</p></div>
       @if (canManage()) {
-        @if (selected(); as p) {
-          <button class="btn" type="button" (click)="newPlan(p)"><app-icon name="plus" [size]="16" />{{ 'products.newPlan' | t }}</button>
-        }
         <button class="btn btn-primary" type="button" (click)="newProduct()"><app-icon name="plus" [size]="16" />{{ 'products.new' | t }}</button>
       }
-    </app-page-head>
+    </header>
 
-    <app-state [loading]="products.loading() && !products.data()" [error]="products.error()" [empty]="products.data()?.total === 0" (retry)="products.load()">
-      <div class="product-grid">
-        @for (p of products.data()?.items; track p.id) {
-          <button type="button" class="product-card" [class.selected]="selected()?.id === p.id" (click)="selected.set(p)">
-            <header>
-              <strong>{{ p.name }}</strong>
-              @if (p.isActive) { <span class="badge ok">{{ 'products.available' | t }}</span> }
-              @else { <span class="badge neutral">{{ 'status.Inactive' | t }}</span> }
-            </header>
-            <small class="muted">{{ 'products.codeLabel' | t: { c: p.code } }}</small>
-            <p>{{ p.description }}</p>
-            <footer>
-              <span>{{ 'products.plansAvailable' | t }}: <b>{{ 'products.plansN' | t: { n: p.publishedPlans } }}</b></span>
-              @if (canManage()) { <span class="link" role="link" (click)="$event.stopPropagation(); editProduct(p)">{{ 'common.edit' | t }}</span> }
-            </footer>
-          </button>
+    <div class="filters">
+      <div class="search">
+        <app-icon name="search" [size]="16" />
+        <input type="search" [placeholder]="'products.searchPh' | t" [ngModel]="search()" (ngModelChange)="search.set($event)" />
+      </div>
+      <select [ngModel]="status()" (ngModelChange)="status.set($event)" [attr.aria-label]="'col.status' | t">
+        <option value="">{{ 'filter.allStatus' | t }}</option>
+        <option value="active">{{ 'status.Active' | t }}</option>
+        <option value="inactive">{{ 'status.Inactive' | t }}</option>
+      </select>
+    </div>
+
+    <app-state [loading]="products.loading() && !products.data()" [error]="products.error()" [empty]="visible().length === 0" (retry)="products.load()">
+      <div class="product-grid2">
+        @for (p of visible(); track p.id; let i = $index) {
+          <article class="pcard">
+            <div class="pcard-head">
+              <span class="tile" [class]="'tile ' + tone(i)"><app-icon name="cube" [size]="22" /></span>
+              <div><strong>{{ p.name }}</strong><small>{{ p.description }}</small></div>
+              <div class="row-menu">
+                <button class="kebab" type="button" [attr.aria-label]="'col.actions' | t" (click)="toggleMenu(p.id, $event)"><app-icon name="moreV" /></button>
+                @if (menuFor() === p.id) {
+                  <div class="menu" role="menu">
+                    <button role="menuitem" type="button" (click)="router.navigate(['/plans'], { queryParams: { product: p.id } })"><app-icon name="layers" [size]="16" />{{ 'products.viewPlans' | t }}</button>
+                    @if (canManage()) {
+                      <button role="menuitem" type="button" (click)="editProduct(p)"><app-icon name="edit" [size]="16" />{{ 'common.edit' | t }}</button>
+                      <button role="menuitem" type="button" (click)="toggleActive(p)"><app-icon name="ban" [size]="16" />{{ (p.isActive ? 'customers.deactivate' : 'customers.activate') | t }}</button>
+                    }
+                  </div>
+                }
+              </div>
+            </div>
+            <div class="platform-chips">@for (pl of p.platforms; track pl) { <span>{{ pl }}</span> }</div>
+            <div class="pcard-stats">
+              <div><small>{{ 'nav.plans' | t }}</small><b>{{ p.plans | num }}</b></div>
+              <div><small>{{ 'col.licenses' | t }}</small><b>{{ p.licenses | num }}</b></div>
+              <span class="badge" [class.ok]="p.isActive" [class.neutral]="!p.isActive">{{ (p.isActive ? 'status.Active' : 'status.Inactive') | t }}</span>
+            </div>
+          </article>
         }
       </div>
     </app-state>
-
-    <section class="card">
-      <div class="card-head">
-        <h2>{{ 'products.matrix' | t }} @if (i18n.lang() === 'ar') { <span dir="ltr">(Plan Pricing &amp; Entitlements)</span> }</h2>
-        @if (selected(); as p) { <span class="badge info">{{ p.name }}</span> }
-      </div>
-      <app-state [loading]="plans.loading() && !plans.data()" [error]="plans.error()" [empty]="plans.data()?.total === 0" (retry)="plans.load()">
-        <div class="table-wrap">
-          <table>
-            <thead><tr>
-              <th>{{ 'plans.planName' | t }}</th><th>{{ 'plans.productCol' | t }}</th><th>{{ 'plans.cycle' | t }}</th>
-              <th>{{ 'plans.price' | t }}</th><th>{{ 'plans.entitlementsCol' | t }}</th><th>{{ 'common.status' | t }}</th><th>{{ 'common.actions' | t }}</th>
-            </tr></thead>
-            <tbody>
-              @for (pl of plans.data()?.items; track pl.id) {
-                <tr [class.dim]="pl.status === 'Archived'">
-                  <td><strong>{{ pl.name }}</strong><span class="cell-sub mono" dir="ltr">{{ pl.code }} v{{ pl.version }}</span></td>
-                  <td>{{ pl.productName }}</td>
-                  <td>{{ cycle(pl) }}
-                    @if (pl.trialDays) { <span class="cell-sub">{{ 'plans.trial' | t }}: {{ pl.trialDays }}</span> }</td>
-                  <td dir="ltr" class="price-cell"><strong>{{ pl.price | num }}</strong> {{ pl.currency }}</td>
-                  <td>
-                    <span>{{ pl.maxActivations ? ('plans.devicesUpTo' | t: { n: pl.maxActivations }) : ('plans.devicesUnlimited' | t) }}</span>
-                    <div class="chips">@for (f of pl.features; track f) { <span class="chip" dir="ltr">{{ f }}</span> }</div>
-                  </td>
-                  <td><app-status [value]="pl.status" /></td>
-                  <td class="actions">
-                    @if (canManage()) {
-                      @if (pl.status === 'Draft') {
-                        <button class="btn btn-sm" type="button" (click)="editPlan(pl)">{{ 'plans.editPlan' | t }}</button>
-                        <button class="btn btn-sm btn-primary" type="button" (click)="planAction(pl, 'publish')">{{ 'plans.publish' | t }}</button>
-                      }
-                      @if (pl.status === 'Published') {
-                        <button class="btn btn-sm" type="button" (click)="planAction(pl, 'version')">{{ 'plans.newVersion' | t }}</button>
-                        <button class="btn btn-sm" type="button" (click)="planAction(pl, 'archive')">{{ 'plans.archive' | t }}</button>
-                      }
-                    }
-                  </td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        </div>
-      </app-state>
-    </section>
 
     <app-modal [(open)]="productOpen" [title]="(editingProduct() ? 'common.edit' : 'products.new') | t">
       <form class="form" (ngSubmit)="saveProduct()">
         <label class="field"><span>{{ 'common.code' | t }}</span><input name="code" dir="ltr" required [disabled]="!!editingProduct()" [(ngModel)]="pForm.code" /></label>
         <label class="field"><span>{{ 'common.name' | t }}</span><input name="name" required [(ngModel)]="pForm.name" /></label>
         <label class="field"><span>{{ 'common.description' | t }}</span><textarea name="desc" rows="3" [(ngModel)]="pForm.description"></textarea></label>
+        <fieldset class="field">
+          <legend>{{ 'products.platforms' | t }}</legend>
+          <div class="platform-chips">
+            @for (pl of allPlatforms; track pl) {
+              <label class="check"><input type="checkbox" [checked]="pForm.platforms.includes(pl)" (change)="togglePlatform(pl)" /> {{ pl }}</label>
+            }
+          </div>
+        </fieldset>
         @if (editingProduct()) { <label class="check"><input type="checkbox" name="active" [(ngModel)]="pForm.isActive" /> {{ 'common.active' | t }}</label> }
-        <div class="form-actions"><button class="btn btn-primary" type="submit">{{ 'common.save' | t }}</button></div>
-      </form>
-    </app-modal>
-
-    <app-modal [(open)]="planOpen" [title]="(editingPlan() ? 'common.edit' : 'products.newPlan') | t" wide>
-      <form class="form" (ngSubmit)="savePlan()">
-        <div class="grid-2">
-          <label class="field"><span>{{ 'common.code' | t }}</span><input name="code" dir="ltr" required [disabled]="!!editingPlan()" [(ngModel)]="plForm.code" /></label>
-          <label class="field"><span>{{ 'common.name' | t }}</span><input name="name" required [(ngModel)]="plForm.name" /></label>
-          <label class="field"><span>{{ 'plans.price' | t }}</span><input name="price" type="number" min="0" step="0.01" required [(ngModel)]="plForm.price" /></label>
-          <label class="field"><span>{{ 'plans.currency' | t }}</span><input name="currency" dir="ltr" maxlength="3" required [(ngModel)]="plForm.currency" /></label>
-          <label class="field"><span>{{ 'plans.duration' | t }}</span><input name="duration" type="number" min="1" [(ngModel)]="plForm.durationDays" />
-            <small class="muted">{{ 'plans.durationHint' | t }}</small></label>
-          <label class="field"><span>{{ 'plans.trial' | t }}</span><input name="trial" type="number" min="0" max="90" [(ngModel)]="plForm.trialDays" /></label>
-          <label class="field"><span>{{ 'plans.maxActivations' | t }}</span><input name="max" type="number" min="1" [(ngModel)]="plForm.maxActivations" />
-            <small class="muted">{{ 'plans.maxHint' | t }}</small></label>
-          <label class="field"><span>{{ 'plans.heartbeat' | t }}</span><input name="hb" type="number" min="1" max="720" required [(ngModel)]="plForm.heartbeatIntervalHours" /></label>
-          <label class="field"><span>{{ 'plans.grace' | t }}</span><input name="grace" type="number" min="0" max="365" required [(ngModel)]="plForm.offlineGraceDays" /></label>
-        </div>
-        <label class="field"><span>{{ 'plans.features' | t }}</span><input name="features" dir="ltr" [(ngModel)]="featuresText" placeholder="reports, export, multi-branch" /></label>
         <div class="form-actions"><button class="btn btn-primary" type="submit">{{ 'common.save' | t }}</button></div>
       </form>
     </app-modal>
@@ -121,86 +87,52 @@ export class CatalogPage {
   private api = inject(Api);
   private toasts = inject(Toasts);
   readonly i18n = inject(I18n);
+  readonly router = inject(Router);
   readonly auth = inject(AuthService);
   readonly canManage = computed(() => this.auth.can(this.auth.perm.CatalogManage));
+  readonly allPlatforms = Platforms;
 
+  readonly search = signal('');
+  readonly status = signal('');
+  readonly menuFor = signal<string | null>(null);
   readonly products = loader(() => this.api.products({ pageSize: 200 }));
-  readonly selected = signal<Product | null>(null);
-  readonly plans = loader(() => this.api.plans({ productId: this.selected()?.id, pageSize: 200 }), false);
+  readonly visible = computed(() => {
+    const q = this.search().trim().toLowerCase();
+    return (this.products.data()?.items ?? []).filter(p =>
+      (!q || p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q)) &&
+      (!this.status() || (this.status() === 'active') === p.isActive));
+  });
 
   readonly productOpen = signal(false);
   readonly editingProduct = signal<Product | null>(null);
-  pForm = { code: '', name: '', description: '', isActive: true };
+  pForm = { code: '', name: '', description: '', isActive: true, platforms: [] as string[] };
 
-  readonly planOpen = signal(false);
-  readonly editingPlan = signal<Plan | null>(null);
-  plForm: SavePlan = this.emptyPlan('');
-  featuresText = '';
+  @HostListener('document:click') closeMenus() { this.menuFor.set(null); }
+  toggleMenu(id: string, e: Event) { e.stopPropagation(); this.menuFor.set(this.menuFor() === id ? null : id); }
+  tone(i: number) { return ['blue', 'violet', 'teal', 'orange'][i % 4]; }
 
-  constructor() {
-    effect(() => {
-      const items = this.products.data()?.items ?? [];
-      const current = this.selected();
-      if (items.length && (!current || !items.some(p => p.id === current.id))) this.selected.set(items[0]);
-    });
-    effect(() => { if (this.selected()) this.plans.load(); });
-  }
-
-  cycle(pl: Plan): string {
-    if (!pl.durationDays) return this.i18n.t('common.lifetime');
-    if (pl.durationDays === 30 || pl.durationDays === 31) return this.i18n.t('plans.cycleMonthly');
-    if (pl.durationDays === 365) return this.i18n.t('plans.cycleYearly');
-    return this.i18n.t('plans.cycleDays', { n: pl.durationDays });
+  togglePlatform(pl: string) {
+    this.pForm.platforms = this.pForm.platforms.includes(pl) ? this.pForm.platforms.filter(x => x !== pl) : [...this.pForm.platforms, pl];
   }
 
   private ok() { this.toasts.success(this.i18n.t('common.saved')); }
 
-  newProduct() { this.editingProduct.set(null); this.pForm = { code: '', name: '', description: '', isActive: true }; this.productOpen.set(true); }
+  newProduct() { this.editingProduct.set(null); this.pForm = { code: '', name: '', description: '', isActive: true, platforms: ['Windows'] }; this.productOpen.set(true); }
+
   editProduct(p: Product) {
     this.editingProduct.set(p);
-    this.pForm = { code: p.code, name: p.name, description: p.description ?? '', isActive: p.isActive };
+    this.pForm = { code: p.code, name: p.name, description: p.description ?? '', isActive: p.isActive, platforms: [...p.platforms] };
     this.productOpen.set(true);
+  }
+
+  toggleActive(p: Product) {
+    this.api.updateProduct(p.id, { code: p.code, name: p.name, description: p.description, isActive: !p.isActive, platforms: p.platforms })
+      .subscribe(() => { this.ok(); this.products.load(); });
   }
 
   saveProduct() {
     const e = this.editingProduct();
     const req = e ? this.api.updateProduct(e.id, this.pForm) : this.api.createProduct(this.pForm);
-    req.subscribe(p => { this.ok(); this.productOpen.set(false); this.products.load(); this.selected.set(p); });
-  }
-
-  private emptyPlan(productId: string): SavePlan {
-    return { productId, code: '', name: '', price: 0, currency: 'EGP', durationDays: 365, trialDays: null, maxActivations: 1,
-      heartbeatIntervalHours: 24, offlineGraceDays: 7, features: [] };
-  }
-
-  newPlan(p: Product) { this.editingPlan.set(null); this.plForm = this.emptyPlan(p.id); this.featuresText = ''; this.planOpen.set(true); }
-
-  editPlan(pl: Plan) {
-    this.editingPlan.set(pl);
-    this.plForm = { productId: pl.productId, code: pl.code, name: pl.name, price: pl.price, currency: pl.currency,
-      durationDays: pl.durationDays ?? null, trialDays: pl.trialDays ?? null, maxActivations: pl.maxActivations ?? null,
-      heartbeatIntervalHours: pl.heartbeatIntervalHours, offlineGraceDays: pl.offlineGraceDays, features: pl.features };
-    this.featuresText = pl.features.join(', ');
-    this.planOpen.set(true);
-  }
-
-  savePlan() {
-    const nullIfEmpty = (v: unknown) => (v === '' || v === null || v === undefined ? null : Number(v));
-    const body: SavePlan = {
-      ...this.plForm,
-      price: Number(this.plForm.price),
-      durationDays: nullIfEmpty(this.plForm.durationDays),
-      trialDays: nullIfEmpty(this.plForm.trialDays),
-      maxActivations: nullIfEmpty(this.plForm.maxActivations),
-      features: this.featuresText.split(',').map(f => f.trim()).filter(Boolean),
-    };
-    const e = this.editingPlan();
-    (e ? this.api.updatePlan(e.id, body) : this.api.createPlan(body))
-      .subscribe(() => { this.ok(); this.planOpen.set(false); this.plans.load(); });
-  }
-
-  planAction(pl: Plan, action: 'publish' | 'archive' | 'version') {
-    const req = action === 'publish' ? this.api.publishPlan(pl.id) : action === 'archive' ? this.api.archivePlan(pl.id) : this.api.newPlanVersion(pl.id);
-    req.subscribe(() => { this.ok(); this.plans.load(); this.products.load(); });
+    req.subscribe(() => { this.ok(); this.productOpen.set(false); this.products.load(); });
   }
 }

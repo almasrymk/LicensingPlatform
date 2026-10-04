@@ -116,20 +116,46 @@ export class StateView {
   selector: 'app-pager',
   imports: [TranslatePipe],
   template: `
-    @if (pages() > 1) {
-      <nav class="pager" aria-label="pagination">
-        <button class="btn btn-ghost" type="button" [disabled]="page() <= 1" (click)="page.set(page() - 1)">{{ 'common.prev' | t }}</button>
-        <span>{{ 'common.page' | t: { page: page(), pages: pages() } }}</span>
-        <button class="btn btn-ghost" type="button" [disabled]="page() >= pages()" (click)="page.set(page() + 1)">{{ 'common.next' | t }}</button>
-      </nav>
+    @if (total() > 0) {
+      <div class="table-foot">
+        <span>{{ 'pager.showing' | t: { from: from(), to: to(), total: total() } }}</span>
+        <nav class="pages" aria-label="pagination">
+          <button type="button" [attr.aria-label]="'common.prev' | t" [disabled]="page() <= 1" (click)="go(page() - 1)">‹</button>
+          @for (p of numbers(); track $index) {
+            @if (p === 0) { <span class="gap">…</span> }
+            @else { <button type="button" [class.active]="p === page()" (click)="go(p)">{{ p }}</button> }
+          }
+          <button type="button" [attr.aria-label]="'common.next' | t" [disabled]="page() >= pages()" (click)="go(page() + 1)">›</button>
+          @if (sizes().length) {
+            <select [value]="pageSize()" (change)="setSize(+$any($event.target).value)" [attr.aria-label]="'pager.perPage' | t: { n: pageSize() }">
+              @for (s of sizes(); track s) { <option [value]="s" [selected]="s === pageSize()">{{ 'pager.perPage' | t: { n: s } }}</option> }
+            </select>
+          }
+        </nav>
+      </div>
     }
   `,
 })
 export class Pager {
   readonly page = model(1);
   readonly total = input(0);
-  readonly pageSize = input(20);
+  readonly pageSize = model(20);
+  readonly sizes = input<number[]>([10, 20, 50]);
   readonly pages = computed(() => Math.max(1, Math.ceil(this.total() / this.pageSize())));
+  readonly from = computed(() => Math.min(this.total(), (this.page() - 1) * this.pageSize() + 1));
+  readonly to = computed(() => Math.min(this.total(), this.page() * this.pageSize()));
+  /** Page numbers with 0 as an ellipsis: 1 … 4 5 6 … 26. */
+  readonly numbers = computed(() => {
+    const n = this.pages(), p = this.page();
+    if (n <= 7) return Array.from({ length: n }, (_, i) => i + 1);
+    const set = [1, p - 1, p, p + 1, n].filter(x => x >= 1 && x <= n);
+    const sorted = [...new Set(set)].sort((a, b) => a - b);
+    const out: number[] = [];
+    sorted.forEach((x, i) => { if (i && x - sorted[i - 1] > 1) out.push(0); out.push(x); });
+    return out;
+  });
+  go(p: number) { this.page.set(Math.min(Math.max(1, p), this.pages())); }
+  setSize(size: number) { this.pageSize.set(size); this.page.set(1); }
 }
 
 @Component({

@@ -15,7 +15,14 @@ public sealed record LicenseDto(
 
 public sealed record ActivationDto(
     Guid Id, Guid LicenseId, string DeviceId, string? DeviceName, string? AppVersion, ActivationStatus Status,
-    DateTimeOffset ActivatedAt, DateTimeOffset? DeactivatedAt, DateTimeOffset? LastHeartbeatAt, string? LastIpAddress);
+    DateTimeOffset ActivatedAt, DateTimeOffset? DeactivatedAt, DateTimeOffset? LastHeartbeatAt, string? LastIpAddress,
+    string? OperatingSystem, bool Online);
+
+/// <summary>One device across all licenses (Activations / Devices screen).</summary>
+public sealed record ActivationRowDto(
+    Guid Id, Guid LicenseId, string LicenseNumber, Guid CustomerId, string CustomerName, string ProductCode, string DeviceId,
+    string? DeviceName, string? OperatingSystem, string? AppVersion, string? LastIpAddress, ActivationStatus Status,
+    DateTimeOffset ActivatedAt, DateTimeOffset? LastHeartbeatAt, bool Online);
 
 public sealed record LicenseDetailsDto(LicenseDto License, IReadOnlyList<ActivationDto> Activations);
 
@@ -59,12 +66,60 @@ public sealed class LicenseService(
     {
         var row = await Rows(db.Licenses.Where(l => l.Id == id)).FirstOrDefaultAsync(ct);
         if (row is null) return AppErrors.NotFound("License");
+        var onlineSince = clock.GetUtcNow().AddHours(-2 * row.L.HeartbeatIntervalHours);
         var activations = await db.LicenseActivations.Where(a => a.LicenseId == id)
             .OrderByDescending(a => a.Status == ActivationStatus.Active).ThenByDescending(a => a.ActivatedAt)
             .Select(a => new ActivationDto(a.Id, a.LicenseId, a.DeviceId, a.DeviceName, a.AppVersion, a.Status,
-                a.ActivatedAt, a.DeactivatedAt, a.LastHeartbeatAt, a.LastIpAddress))
+                a.ActivatedAt, a.DeactivatedAt, a.LastHeartbeatAt, a.LastIpAddress, a.OperatingSystem,
+                a.Status == ActivationStatus.Active && a.LastHeartbeatAt != null && a.LastHeartbeatAt >= onlineSince))
             .ToListAsync(ct);
         return new LicenseDetailsDto(ToDto(row), activations);
+    }
+
+    /// <summary>All devices the caller can see, newest first. "Online" = checked in within two heartbeat intervals.</summary>
+    public async Task<PagedResult<ActivationRowDto>> ListActivationsAsync(PageQuery page, ActivationStatus? status, Guid? licenseId, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var q = from a in db.LicenseActivations
+                join l in db.Licenses on a.LicenseId equals l.Id
+                join c in db.Customers on a.CustomerId equals c.Id
+                select new { a, l.LicenseNumber, l.ProductCode, l.HeartbeatIntervalHours, CustomerName = c.Name };
+        if (status is not null) q = q.Where(x => x.a.Status == status);
+        if (licenseId is not null) q = q.Where(x => x.a.LicenseId == licenseId);
+        if (!string.IsNullOrWhiteSpace(page.Search))
+        {
+            var s = page.Search.Trim();
+            q = q.Where(x => x.a.DeviceId.Contains(s) || (x.a.DeviceName != null && x.a.DeviceName.Contains(s)) ||
+                             x.LicenseNumber.Contains(s) || x.CustomerName.Contains(s) || (x.a.LastIpAddress != null && x.a.LastIpAddress.Contains(s)));
+        }
+        var total = await q.CountAsync(ct);
+        var rows = await q.OrderByDescending(x => x.a.LastHeartbeatAt ?? x.a.ActivatedAt)
+            .Skip((page.SafePage - 1) * page.SafePageSize).Take(page.SafePageSize).ToListAsync(ct);
+        var items = rows.Select(x => new ActivationRowDto(x.a.Id, x.a.LicenseId, x.LicenseNumber, x.a.CustomerId, x.CustomerName, x.ProductCode,
+            x.a.DeviceId, x.a.DeviceName, x.a.OperatingSystem, x.a.AppVersion, x.a.LastIpAddress, x.a.Status, x.a.ActivatedAt, x.a.LastHeartbeatAt,
+            x.a.Status == ActivationStatus.Active && x.a.LastHeartbeatAt is { } hb && hb >= now.AddHours(-2 * x.HeartbeatIntervalHours))).ToList();
+        return new PagedResult<ActivationRowDto>(items, total, page.SafePage, page.SafePageSize);
+    }
+
+    /// <summary>
+    /// Replaces a leaked product key. The old key fails its next check, every device is released and must activate again
+    /// with the new key, which is returned once.
+    /// </summary>
+    public async Task<Result<IssuedLicenseDto>> RegenerateKeyAsync(Guid id, CancellationToken ct)
+    {
+        var license = await db.Licenses.FirstOrDefaultAsync(l => l.Id == id, ct);
+        if (license is null) return AppErrors.NotFound("License");
+        var oldHash = license.ProductKeyHash;
+        var now = clock.GetUtcNow();
+        var (plainKey, hash, prefix) = keys.Generate();
+        license.RegenerateKey(hash, prefix);
+        var activations = await db.LicenseActivations.Where(a => a.LicenseId == id && a.Status == ActivationStatus.Active).ToListAsync(ct);
+        activations.ForEach(a => a.Deactivate(now));
+        audit.Add("license.key_regenerated", "License", id.ToString(), details: $"prefix={prefix} devices_released={activations.Count}", tenantId: license.TenantId);
+        await db.SaveChangesAsync(ct);
+        await cache.RemoveAsync(LicenseCacheKeys.For(license.TenantId, oldHash), ct);
+        await cache.RemoveAsync(LicenseCacheKeys.For(license.TenantId, hash), ct);
+        return new IssuedLicenseDto((await GetAsync(id, ct)).Value.License, plainKey);
     }
 
     /// <summary>Issues a license for a subscription with a snapshot of the plan's entitlements. The key is returned once.</summary>

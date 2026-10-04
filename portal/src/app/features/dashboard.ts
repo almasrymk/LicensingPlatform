@@ -1,116 +1,140 @@
-import { Component, computed, inject } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { Api } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
-import { LocalDatePipe, LocalNumberPipe, TranslatePipe } from '../core/i18n.service';
+import { Kpi } from '../core/api.models';
+import { AgoPipe, I18n, LocalNumberPipe, TranslatePipe } from '../core/i18n.service';
+import { CHART_COLORS, Donut, LineChart, Series } from '../shared/charts';
 import { Icon } from '../shared/icon';
-import { PageHead, StateView, StatusBadge, loader } from '../shared/ui';
+import { StateView, loader } from '../shared/ui';
 
-interface AlertItem { tone: 'bad' | 'warn' | 'info'; title: string; body: string; n: number; link: string; params?: Record<string, string>; }
-
-/** Design page 2: four KPI cards, recently issued licenses, operational alerts. */
+/** Dashboard from the mockup: five KPI tiles, revenue/subscriptions trend, licenses by product, recent activations, needs attention. */
 @Component({
   selector: 'app-dashboard',
-  imports: [TranslatePipe, LocalNumberPipe, LocalDatePipe, StateView, StatusBadge, PageHead, Icon, RouterLink],
+  imports: [FormsModule, RouterLink, TranslatePipe, LocalNumberPipe, AgoPipe, StateView, Icon, LineChart, Donut],
   template: `
-    <app-page-head title="dash.title" en="Platform Dashboard" [subtitle]="auth.isCustomerUser() ? 'dash.customerSub' : 'dash.sub'">
-      <a class="btn" routerLink="/reports"><app-icon name="filter" [size]="16" />{{ 'dash.filter' | t }}</a>
-      @if (auth.can(auth.perm.TenantsManage)) {
-        <a class="btn btn-primary" routerLink="/tenants" [queryParams]="{ new: 1 }"><app-icon name="plus" [size]="16" />{{ 'tenants.new' | t }}</a>
-      } @else if (auth.can(auth.perm.CustomersManage)) {
-        <a class="btn btn-primary" routerLink="/customers" [queryParams]="{ new: 1 }"><app-icon name="plus" [size]="16" />{{ 'customers.new' | t }}</a>
-      }
-    </app-page-head>
+    <header class="page-head">
+      <div>
+        <h1>{{ 'dash.title' | t }}</h1>
+        <p class="subtitle">{{ 'dash.welcome' | t: { name: firstName() } }}</p>
+      </div>
+      <span class="date-range"><app-icon name="calendar" [size]="16" />{{ monthRange() }}</span>
+    </header>
 
-    <app-state [loading]="data.loading() && !d()" [error]="data.error()" (retry)="data.load()">
-      @if (d(); as d) {
-        <section class="kpis">
+    <app-state [loading]="data.loading() && !o()" [error]="data.error()" (retry)="data.load()">
+      @if (o(); as o) {
+        <section class="kpi-row">
           @if (auth.isPlatformAdmin()) {
-            <a class="kpi" routerLink="/tenants">
-              <div class="kpi-top"><span>{{ 'dash.activeTenants' | t }}</span><app-icon name="building" class="c-blue" /></div>
-              <strong>{{ d.activeTenants | num }}</strong>
-              <small>{{ 'dash.ofTotal' | t: { n: d.tenants } }}</small>
+            <a class="kpi2" routerLink="/tenants">
+              <span class="tile blue"><app-icon name="building" [size]="22" /></span>
+              <div><span class="label">{{ 'k.totalTenants' | t }}</span><span class="value">{{ o.tenants.value | num }}</span>
+                <span class="delta"><b [class.down]="(o.tenants.changePercent ?? 0) < 0">{{ pct(o.tenants) }}</b> {{ 'k.fromLastMonth' | t }}</span></div>
             </a>
-          } @else {
-            <a class="kpi" [routerLink]="auth.isCustomerUser() ? '/reports' : '/customers'" [queryParams]="auth.isCustomerUser() ? { tab: 'devices' } : {}">
-              <div class="kpi-top">
-                <span>{{ (auth.isCustomerUser() ? 'dash.devices' : 'dash.customers') | t }}</span>
-                <app-icon [name]="auth.isCustomerUser() ? 'monitor' : 'users'" class="c-blue" />
-              </div>
-              <strong>{{ (auth.isCustomerUser() ? d.activeDevices : d.customers) | num }}</strong>
-              <small>{{ 'dash.devicesN' | t: { n: d.activeDevices } }}</small>
+          } @else if (!auth.isCustomerUser()) {
+            <a class="kpi2" routerLink="/customers">
+              <span class="tile blue"><app-icon name="users" [size]="22" /></span>
+              <div><span class="label">{{ 'k.customers' | t }}</span><span class="value">{{ o.customers.value | num }}</span>
+                <span class="delta"><b [class.down]="(o.customers.changePercent ?? 0) < 0">{{ pct(o.customers) }}</b> {{ 'k.fromLastMonth' | t }}</span></div>
             </a>
           }
-          <a class="kpi" routerLink="/licenses">
-            <div class="kpi-top"><span>{{ 'dash.licensesActive' | t }}</span><app-icon name="key" class="c-green" /></div>
-            <strong>{{ d.activeLicenses | num }}</strong>
-            <small class="up"><app-icon name="trendUp" [size]="14" />{{ 'dash.devicesN' | t: { n: d.activeDevices } }}</small>
+          <a class="kpi2" routerLink="/licenses">
+            <span class="tile green"><app-icon name="key" [size]="22" /></span>
+            <div><span class="label">{{ 'k.activeLicenses' | t }}</span><span class="value">{{ o.activeLicenses.value | num }}</span>
+              <span class="delta"><b [class.down]="(o.activeLicenses.changePercent ?? 0) < 0">{{ pct(o.activeLicenses) }}</b> {{ 'k.fromLastMonth' | t }}</span></div>
           </a>
-          <a class="kpi" routerLink="/subscriptions">
-            <div class="kpi-top"><span>{{ 'dash.runningSubs' | t }}</span><app-icon name="invoice" class="c-violet" /></div>
-            <strong>{{ d.activeSubscriptions + d.trialSubscriptions | num }}</strong>
-            <small>{{ 'dash.trialsN' | t: { n: d.trialSubscriptions } }}</small>
+          <a class="kpi2" routerLink="/subscriptions">
+            <span class="tile violet"><app-icon name="list" [size]="22" /></span>
+            <div><span class="label">{{ 'k.subscriptions' | t }}</span><span class="value">{{ o.subscriptions.value | num }}</span>
+              <span class="delta"><b [class.down]="(o.subscriptions.changePercent ?? 0) < 0">{{ pct(o.subscriptions) }}</b> {{ 'k.fromLastMonth' | t }}</span></div>
           </a>
-          <a class="kpi" [class.warn]="d.expiringIn30Days > 0" routerLink="/reports">
-            <div class="kpi-top"><span>{{ 'dash.expiring' | t }}</span><app-icon name="alert" class="c-amber" /></div>
-            <strong>{{ d.expiringIn30Days | num }}</strong>
-            @if (d.expiringIn7Days > 0) { <small class="urgent">{{ 'dash.urgent' | t }}</small> }
-            @else { <small>{{ 'dash.within30' | t: { n: d.expiringIn30Days } }}</small> }
+          <a class="kpi2" routerLink="/subscriptions">
+            <span class="tile orange"><app-icon name="invoice" [size]="22" /></span>
+            <div><span class="label">{{ 'k.revenue' | t }}</span><span class="value" dir="ltr">{{ i18n.money(o.revenue.value, o.currency) }}</span>
+              <span class="delta"><b [class.down]="(o.revenue.changePercent ?? 0) < 0">{{ pct(o.revenue) }}</b> {{ 'k.fromLastMonth' | t }}</span></div>
+          </a>
+          <a class="kpi2" routerLink="/reports">
+            <span class="tile red"><app-icon name="alert" [size]="22" /></span>
+            <div><span class="label">{{ 'k.expiringSoon' | t }}</span><span class="value">{{ o.expiringSoon | num }}</span>
+              <span class="delta">{{ 'k.next30' | t }}</span></div>
           </a>
         </section>
 
-        <div class="grid-main-side">
-          <section class="card">
-            <div class="card-head"><h2>{{ 'dash.recentLicenses' | t }}</h2><a routerLink="/licenses">{{ 'common.view' | t }}</a></div>
-            <app-state [loading]="recent.loading() && !recent.data()" [error]="recent.error()" [empty]="recent.data()?.total === 0" (retry)="recent.load()">
-              <div class="table-wrap">
-                <table>
-                  <thead><tr><th>{{ 'lic.number' | t }}</th><th>{{ 'common.customer' | t }}</th><th>{{ 'common.product' | t }}</th><th>{{ 'common.status' | t }}</th></tr></thead>
-                  <tbody>
-                    @for (l of recent.data()?.items; track l.id) {
-                      <tr>
-                        <td><a [routerLink]="['/licenses', l.id]" class="mono" dir="ltr">{{ l.licenseNumber }}</a></td>
-                        <td>{{ l.customerName }}</td>
-                        <td>{{ l.productCode }} / {{ l.planCode }}</td>
-                        <td><app-status [value]="l.status" /></td>
-                      </tr>
-                    }
-                  </tbody>
-                </table>
-              </div>
-            </app-state>
-          </section>
-
-          <section class="card">
-            <h2>{{ 'dash.alerts' | t }}</h2>
-            @for (a of alerts(); track a.title) {
-              <a class="alert" [class]="'alert alert-' + a.tone" [routerLink]="a.link" [queryParams]="a.params ?? {}">
-                <strong>{{ a.title | t }}</strong>
-                <p>{{ a.body | t: { n: a.n } }}</p>
-              </a>
-            } @empty {
-              <div class="alert alert-info"><strong>{{ 'alert.none' | t }}</strong></div>
-            }
-            <a class="btn block" routerLink="/reports">{{ 'dash.viewAlerts' | t }}</a>
-          </section>
-        </div>
-
-        <section class="card">
-          <h2>{{ 'dash.trend' | t }}</h2>
-          <div class="legend">
-            <span><i class="dot ok"></i>{{ 'dash.successful' | t }}</span>
-            <span><i class="dot bad"></i>{{ 'dash.failed' | t }}</span>
-          </div>
-          <div class="bars" role="img" [attr.aria-label]="'dash.trend' | t">
-            @for (p of d.activationsTrend; track p.day) {
-              <div class="bar-col" [title]="(p.day | date2) + ': ' + p.successful + ' / ' + p.failed">
-                <div class="bar-stack">
-                  <div class="bar bad" [style.height.%]="pct(p.failed)"></div>
-                  <div class="bar ok" [style.height.%]="pct(p.successful)"></div>
+        <section class="charts">
+          <div class="card">
+            <div class="card-head">
+              <h2>{{ 'chart.trend' | t }}</h2>
+              <div class="chart-tools">
+                <div class="seg">
+                  <button type="button" [class.active]="granularity() === 'monthly'" (click)="granularity.set('monthly')">{{ 'chart.monthly' | t }}</button>
+                  <button type="button" [class.active]="granularity() === 'yearly'" (click)="granularity.set('yearly')">{{ 'chart.yearly' | t }}</button>
                 </div>
-                <small>{{ p.day.slice(8, 10) }}</small>
+                @if (granularity() === 'monthly') {
+                  <select [ngModel]="year()" (ngModelChange)="year.set(+$event)" aria-label="year">
+                    @for (y of years; track y) { <option [ngValue]="y">{{ y }}</option> }
+                  </select>
+                }
               </div>
+            </div>
+            <div class="chart-legend">
+              <span><i style="background:#2563eb"></i>{{ 'chart.revenue' | t }}</span>
+              <span><i style="background:#10b981"></i>{{ 'chart.subscriptions' | t }}</span>
+            </div>
+            @if (trend.data(); as points) {
+              <app-line-chart [series]="series()" [labels]="labels()" [label]="'chart.trend' | t" [format]="axisFormat" />
             }
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>{{ 'chart.byProduct' | t }}</h2></div>
+            <div class="donut-wrap">
+              <app-donut [slices]="slices()" [centerValue]="(o.totalLicenses | num)" [centerLabel]="'chart.totalLicenses' | t" />
+              <ul class="legend-list">
+                @for (s of o.licensesByProduct; track s.productCode; let i = $index) {
+                  <li><i [style.background]="color(i)"></i><span>{{ s.productName }}</span><b>{{ s.licenses | num }}</b><span class="pct">{{ s.percent }}%</span></li>
+                }
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="lists">
+          <div class="card">
+            <div class="card-head">
+              <h2>{{ 'dash.recentActivations' | t }}</h2>
+              <a class="view-all" routerLink="/activations">{{ 'dash.viewAll' | t }} <app-icon name="arrowRight" class="flip" [size]="14" /></a>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>{{ 'col.customer' | t }}</th><th>{{ 'col.product' | t }}</th><th>{{ 'col.device' | t }}</th><th>{{ 'col.ip' | t }}</th><th>{{ 'col.date' | t }}</th><th></th></tr></thead>
+                <tbody>
+                  @for (a of o.recentActivations; track $index) {
+                    <tr class="clickable" [routerLink]="['/licenses', a.licenseId]">
+                      <td><span class="status-dot" [class.ok]="a.online"></span>{{ a.customerName }}</td>
+                      <td>{{ a.productName }}</td>
+                      <td dir="ltr">{{ a.deviceName ?? a.deviceId }}</td>
+                      <td dir="ltr">{{ a.ipAddress ?? '—' }}</td>
+                      <td>{{ a.at | ago }}</td>
+                      <td><app-icon name="chevronRight" class="flip muted" [size]="16" /></td>
+                    </tr>
+                  } @empty { <tr><td colspan="6" class="muted">{{ 'common.empty' | t }}</td></tr> }
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>{{ 'dash.needsAttention' | t }}</h2></div>
+            <ul class="attention">
+              <li><span class="tile sm red"><app-icon name="alert" /></span><div><strong>{{ o.attention.expiredLicenses | num }}</strong><small>{{ 'att.expired' | t }}</small></div>
+                <a routerLink="/licenses" [queryParams]="{ status: 'Expired' }">{{ 'att.view' | t }} <app-icon name="arrowRight" class="flip" [size]="14" /></a></li>
+              <li><span class="tile sm orange"><app-icon name="invoice" /></span><div><strong>{{ o.attention.renewalsDue | num }}</strong><small>{{ 'att.renewals' | t }}</small></div>
+                <a routerLink="/reports">{{ 'att.view' | t }} <app-icon name="arrowRight" class="flip" [size]="14" /></a></li>
+              <li><span class="tile sm orange"><app-icon name="bell" /></span><div><strong>{{ o.attention.limitReached | num }}</strong><small>{{ 'att.limit' | t }}</small></div>
+                <a routerLink="/licenses">{{ 'att.view' | t }} <app-icon name="arrowRight" class="flip" [size]="14" /></a></li>
+              <li><span class="tile sm teal"><app-icon name="shieldAlert" /></span><div><strong>{{ o.attention.suspiciousActivations | num }}</strong><small>{{ 'att.suspicious' | t }}</small></div>
+                <a routerLink="/reports" [queryParams]="{ tab: 'failed' }">{{ 'att.view' | t }} <app-icon name="arrowRight" class="flip" [size]="14" /></a></li>
+            </ul>
           </div>
         </section>
       }
@@ -120,24 +144,47 @@ interface AlertItem { tone: 'bad' | 'warn' | 'info'; title: string; body: string
 export class DashboardPage {
   private api = inject(Api);
   readonly auth = inject(AuthService);
-  readonly data = loader(() => this.api.dashboard());
-  readonly recent = loader(() => this.api.licenses({ pageSize: 5 }));
-  readonly d = computed(() => this.data.data());
-  private readonly max = computed(() => Math.max(1, ...(this.d()?.activationsTrend ?? []).map(p => p.successful + p.failed)));
-  pct(v: number) { return (v / this.max()) * 100; }
+  readonly i18n = inject(I18n);
 
-  readonly alerts = computed<AlertItem[]>(() => {
-    const d = this.d();
-    if (!d) return [];
-    const list: AlertItem[] = [];
-    if (d.failedActivations7Days > 0)
-      list.push({ tone: 'bad', title: 'alert.failed.title', body: 'alert.failed.body', n: d.failedActivations7Days, link: '/reports', params: { tab: 'failed' } });
-    if (d.expiringIn7Days > 0)
-      list.push({ tone: 'warn', title: 'alert.expiring.title', body: 'alert.expiring.body', n: d.expiringIn7Days, link: '/reports' });
-    if (d.suspendedLicenses > 0)
-      list.push({ tone: 'warn', title: 'alert.suspended.title', body: 'alert.suspended.body', n: d.suspendedLicenses, link: '/licenses' });
-    if (d.revokedLicenses > 0)
-      list.push({ tone: 'info', title: 'alert.revoked.title', body: 'alert.revoked.body', n: d.revokedLicenses, link: '/licenses' });
-    return list;
+  readonly years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
+  readonly year = signal(new Date().getFullYear());
+  readonly granularity = signal<'monthly' | 'yearly'>('monthly');
+
+  readonly data = loader(() => this.api.overview());
+  readonly trend = loader(() => this.api.trend(this.granularity(), this.year()), false);
+  readonly o = computed(() => this.data.data());
+
+  constructor() {
+    effect(() => { this.granularity(); this.year(); this.trend.load(); });
+  }
+
+  /** Current month, as the date range shown in the header. */
+  readonly monthRange = computed(() => {
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString();
+    return `${this.i18n.date(first)} - ${this.i18n.date(last)}`;
   });
+
+  readonly firstName = computed(() => (this.auth.user()?.fullName ?? '').split(' ')[0]);
+
+  readonly labels = computed(() => (this.trend.data() ?? []).map(p => this.granularity() === 'monthly' ? this.i18n.t('m.' + p.label) : p.label));
+  readonly series = computed<Series[]>(() => {
+    const pts = this.trend.data() ?? [];
+    return [
+      { name: this.i18n.t('chart.revenue'), color: '#2563eb', values: pts.map(p => p.revenue) },
+      { name: this.i18n.t('chart.subscriptions'), color: '#10b981', values: pts.map(p => p.subscriptions) },
+    ];
+  });
+  readonly slices = computed(() => (this.o()?.licensesByProduct ?? []).map((s, i) => ({ label: s.productName, value: s.licenses, color: this.color(i) })));
+
+  readonly axisFormat = (v: number) => v >= 1000 ? `${Math.round(v / 100) / 10}K` : String(Math.round(v));
+
+  color(i: number) { return CHART_COLORS[i % CHART_COLORS.length]; }
+
+  pct(k: Kpi): string {
+    if (k.changePercent === null) return '+100%';
+    if (k.changePercent === 0) return this.i18n.t('k.noChange');
+    return `${k.changePercent > 0 ? '+' : ''}${k.changePercent}%`;
+  }
 }

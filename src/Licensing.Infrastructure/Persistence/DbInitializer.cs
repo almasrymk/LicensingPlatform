@@ -72,6 +72,44 @@ public sealed class DbInitializer(
             await SeedDemoAsync(ct);
             logger.LogWarning("Demo data loaded. Demo accounts use the password documented in README; never enable Seed:DemoData in production");
         }
+        else if (o.DemoData)
+        {
+            await BackfillDemoAsync(ct);
+        }
+    }
+
+    private static readonly Dictionary<string, string[]> DemoPlatforms = new()
+    {
+        ["ACCOUNTING"] = ["Windows", "Web"],
+        ["POS"] = ["Windows", "Android"],
+        ["SCHOOL"] = ["Web", "Windows", "macOS"],
+    };
+
+    private static string DemoOs(string deviceId) => deviceId switch
+    {
+        _ when deviceId.Contains("LAPTOP") => "Windows 11 Pro",
+        _ when deviceId.Contains("POS") => "Windows 10 IoT",
+        _ when deviceId.Contains("BRANCH") => "Windows Server 2022",
+        _ when deviceId.Contains("OFFICE") => "Ubuntu 22.04",
+        _ => "Windows 11",
+    };
+
+    /// <summary>Fills fields added after the demo data was first loaded (platforms, device OS). Idempotent.</summary>
+    private async Task BackfillDemoAsync(CancellationToken ct)
+    {
+        var changed = false;
+        foreach (var product in await db.Products.Where(p => p.PlatformsValue == "").ToListAsync(ct))
+            if (DemoPlatforms.TryGetValue(product.Code, out var platforms))
+            {
+                product.Update(product.Name, product.Description, product.IsActive, platforms);
+                changed = true;
+            }
+        foreach (var a in await db.LicenseActivations.Where(a => a.OperatingSystem == null).ToListAsync(ct))
+        {
+            a.Heartbeat(a.AppVersion, a.LastIpAddress, a.LastHeartbeatAt ?? a.ActivatedAt, DemoOs(a.DeviceId));
+            changed = true;
+        }
+        if (changed) await db.SaveChangesAsync(ct);
     }
 
     private async Task BootstrapAdminAsync(SeedOptions o, CancellationToken ct)
@@ -95,9 +133,9 @@ public sealed class DbInitializer(
         stopped.Suspend("عدم سداد الاشتراك", now.AddDays(-10));
         db.Tenants.AddRange(nour, ofoq, stopped);
 
-        var accounting = Product.Create(nour.Id, "ACCOUNTING", "نظام المحاسبة", "برنامج محاسبة متكامل للشركات", now.AddDays(-390));
-        var pos = Product.Create(nour.Id, "POS", "نقطة البيع", "برنامج كاشير ونقاط بيع", now.AddDays(-380));
-        var school = Product.Create(ofoq.Id, "SCHOOL", "نظام إدارة المدارس", "إدارة الطلاب والدرجات والحضور", now.AddDays(-190));
+        var accounting = Product.Create(nour.Id, "ACCOUNTING", "نظام المحاسبة", "برنامج محاسبة متكامل للشركات", now.AddDays(-390), DemoPlatforms["ACCOUNTING"]);
+        var pos = Product.Create(nour.Id, "POS", "نقطة البيع", "برنامج كاشير ونقاط بيع", now.AddDays(-380), DemoPlatforms["POS"]);
+        var school = Product.Create(ofoq.Id, "SCHOOL", "نظام إدارة المدارس", "إدارة الطلاب والدرجات والحضور", now.AddDays(-190), DemoPlatforms["SCHOOL"]);
         db.Products.AddRange(accounting, pos, school);
 
         var accBasic = Plan.Create(nour.Id, accounting.Id, "BASIC", "الأساسية - سنوي", new Money(1200, "EGP"), 365, null, 2, 24, 7,
@@ -219,7 +257,7 @@ public sealed class DbInitializer(
 
         async Task Activate(License l, string deviceId, string name, DateTimeOffset at, DateTimeOffset lastHeartbeat)
         {
-            var a = LicenseActivation.Create(l, deviceId, name, "2.4.1", "41.33.10.10", at);
+            var a = LicenseActivation.Create(l, deviceId, name, "2.4.1", "41.33.10.10", at, DemoOs(deviceId));
             a.Heartbeat("2.4.1", "41.33.10.10", lastHeartbeat);
             db.LicenseActivations.Add(a);
             db.ActivationAttempts.Add(ActivationAttempt.Record(l.TenantId, l, l.ProductKeyPrefix, deviceId, null, "41.33.10.10", at));

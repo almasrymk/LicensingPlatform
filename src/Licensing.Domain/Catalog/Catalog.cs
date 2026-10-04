@@ -13,22 +13,47 @@ public sealed class Product : AggregateRoot, ITenantOwned
     public string? Description { get; private set; }
     public bool IsActive { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
+    /// <summary>Supported platforms, stored as a ';' separated list.</summary>
+    public string PlatformsValue { get; private set; } = "";
 
-    public static Product Create(Guid tenantId, string code, string name, string? description, DateTimeOffset now) => new()
+    public static readonly string[] KnownPlatforms = ["Windows", "Linux", "macOS", "Android", "iOS", "Web"];
+
+    public IReadOnlyList<string> Platforms =>
+        PlatformsValue.Length == 0 ? [] : PlatformsValue.Split(';', StringSplitOptions.RemoveEmptyEntries);
+
+    public static Product Create(Guid tenantId, string code, string name, string? description, DateTimeOffset now, IEnumerable<string>? platforms = null)
     {
-        TenantId = tenantId,
-        Code = Guard.NotEmpty(code, "Code", 32).ToUpperInvariant(),
-        Name = Guard.NotEmpty(name, "Name"),
-        Description = description?.Trim(),
-        IsActive = true,
-        CreatedAt = now,
-    };
+        var product = new Product
+        {
+            TenantId = tenantId,
+            Code = Guard.NotEmpty(code, "Code", 32).ToUpperInvariant(),
+            Name = Guard.NotEmpty(name, "Name"),
+            Description = description?.Trim(),
+            IsActive = true,
+            CreatedAt = now,
+        };
+        product.SetPlatforms(platforms ?? []);
+        return product;
+    }
 
-    public void Update(string name, string? description, bool isActive)
+    public void Update(string name, string? description, bool isActive, IEnumerable<string>? platforms = null)
     {
         Name = Guard.NotEmpty(name, "Name");
         Description = description?.Trim();
         IsActive = isActive;
+        if (platforms is not null) SetPlatforms(platforms);
+    }
+
+    private void SetPlatforms(IEnumerable<string> platforms)
+    {
+        var list = new List<string>();
+        foreach (var p in platforms.Where(p => !string.IsNullOrWhiteSpace(p)))
+        {
+            var known = KnownPlatforms.FirstOrDefault(k => k.Equals(p.Trim(), StringComparison.OrdinalIgnoreCase))
+                ?? throw new DomainException(Error.Validation("VALIDATION_FAILED", $"Unknown platform '{p}'."));
+            if (!list.Contains(known)) list.Add(known);
+        }
+        PlatformsValue = string.Join(';', list);
     }
 }
 

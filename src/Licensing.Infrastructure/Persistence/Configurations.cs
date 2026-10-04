@@ -89,6 +89,8 @@ internal sealed class ProductConfig : IEntityTypeConfiguration<Product>
         b.Property(x => x.Code).HasMaxLength(32);
         b.Property(x => x.Name).HasMaxLength(200);
         b.Property(x => x.Description).HasMaxLength(1000);
+        b.Property(x => x.PlatformsValue).HasColumnName("Platforms").HasMaxLength(200).HasDefaultValue("");
+        b.Ignore(x => x.Platforms);
         b.Ignore(x => x.DomainEvents);
     }
 }
@@ -173,6 +175,7 @@ internal sealed class LicenseActivationConfig : IEntityTypeConfiguration<License
         b.Property(x => x.DeviceName).HasMaxLength(200);
         b.Property(x => x.AppVersion).HasMaxLength(50);
         b.Property(x => x.LastIpAddress).HasMaxLength(64);
+        b.Property(x => x.OperatingSystem).HasMaxLength(100);
     }
 }
 

@@ -161,6 +161,17 @@ public sealed class LicensesController(LicenseService licenses) : ControllerBase
     public async Task<IActionResult> Revoke(Guid id, LicenseActionRequest request, CancellationToken ct) =>
         this.ToActionResult(await licenses.RevokeAsync(id, request, ct));
 
+    /// <summary>Replaces the product key (e.g. after a leak). Releases every device; the new key is returned once.</summary>
+    [HttpPost("{id:guid}/regenerate-key")]
+    [HasPermission(Permissions.LicensesManage)]
+    public async Task<IActionResult> RegenerateKey(Guid id, CancellationToken ct) => this.ToActionResult(await licenses.RegenerateKeyAsync(id, ct));
+
+    /// <summary>All activated devices (Activations / Devices screen).</summary>
+    [HttpGet("/api/v1/activations")]
+    [HasPermission(Permissions.LicensesRead)]
+    public Task<PagedResult<ActivationRowDto>> Activations([FromQuery] PageQuery page, [FromQuery] ActivationStatus? status,
+        [FromQuery] Guid? licenseId, CancellationToken ct) => licenses.ListActivationsAsync(page, status, licenseId, ct);
+
     [HttpPost("{id:guid}/activations/{activationId:guid}/reset")]
     [HasPermission(Permissions.LicensesManage)]
     public async Task<IActionResult> ResetDevice(Guid id, Guid activationId, CancellationToken ct) =>
@@ -221,6 +232,16 @@ public sealed class ReportsController(ReportService reports) : ControllerBase
     [HttpGet("dashboard")]
     [HasPermission(Permissions.ReportsRead)]
     public Task<DashboardDto> Dashboard(CancellationToken ct) => reports.DashboardAsync(ct);
+
+    [HttpGet("overview")]
+    [HasPermission(Permissions.ReportsRead)]
+    public Task<OverviewDto> Overview(CancellationToken ct) => reports.OverviewAsync(ct);
+
+    /// <summary>Revenue and running subscriptions per month of a year (granularity=monthly) or per year (yearly).</summary>
+    [HttpGet("trend")]
+    [HasPermission(Permissions.ReportsRead)]
+    public Task<IReadOnlyList<TrendPointDto>> Trend([FromQuery] string granularity = "monthly", [FromQuery] int? year = null, CancellationToken ct = default) =>
+        reports.TrendAsync(granularity, year ?? DateTime.UtcNow.Year, ct);
 
     [HttpGet("expiring-licenses")]
     [HasPermission(Permissions.ReportsRead)]

@@ -2,7 +2,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import {
   ActiveDevice, ApiClient, ApiClientSecret, AuditRecord, AuthResponse, CustomerDetails, Customer, CustomerStatus, Dashboard,
-  ExpiringLicense, FailedActivations, IssuedLicense, License, LicenseDetails, Paged, Plan, Product, SavePlan, SigningKeys,
+  ExpiringLicense, FailedActivations, Overview, TrendPoint, ActivationRow, IssuedLicense, License, LicenseDetails, Paged, Plan, Product, SavePlan, SigningKeys,
   Subscription, SubscriptionDetails, Tenant, Usage, User, UserProfile,
 } from './api.models';
 
@@ -50,8 +50,8 @@ export class Api {
 
   // Catalog
   products(q?: Query) { return this.http.get<Paged<Product>>(`${this.base}/products`, { params: params(q) }); }
-  createProduct(body: { code: string; name: string; description?: string; tenantId?: string }) { return this.http.post<Product>(`${this.base}/products`, body); }
-  updateProduct(id: string, body: { code: string; name: string; description?: string; isActive: boolean }) {
+  createProduct(body: { code: string; name: string; description?: string; tenantId?: string; platforms?: string[] }) { return this.http.post<Product>(`${this.base}/products`, body); }
+  updateProduct(id: string, body: { code: string; name: string; description?: string; isActive: boolean; platforms?: string[] }) {
     return this.http.put<Product>(`${this.base}/products/${id}`, body);
   }
   plans(q?: Query) { return this.http.get<Paged<Plan>>(`${this.base}/plans`, { params: params(q) }); }
@@ -103,6 +103,16 @@ export class Api {
 
   // Audit & reports
   audit(q?: Query) { return this.http.get<Paged<AuditRecord>>(`${this.base}/audit`, { params: params(q) }); }
+  overview(tenantId?: string) {
+    return this.http.get<Overview>(`${this.base}/reports/overview`, { headers: tenantId ? { 'X-Tenant-Id': tenantId } : {} });
+  }
+  trend(granularity: 'monthly' | 'yearly', year: number) { return this.http.get<TrendPoint[]>(`${this.base}/reports/trend`, { params: params({ granularity, year }) }); }
+  activations(q?: Query) { return this.http.get<Paged<ActivationRow>>(`${this.base}/activations`, { params: params(q) }); }
+  regenerateKey(id: string) { return this.http.post<IssuedLicense>(`${this.base}/licenses/${id}/regenerate-key`, {}); }
+  /** Reads another tenant's data as a platform admin (explicit tenant scope). */
+  scoped<T>(tenantId: string, path: string, q?: Query) {
+    return this.http.get<T>(`${this.base}/${path}`, { params: params(q), headers: { 'X-Tenant-Id': tenantId } });
+  }
   dashboard() { return this.http.get<Dashboard>(`${this.base}/reports/dashboard`); }
   expiring(days: number) { return this.http.get<ExpiringLicense[]>(`${this.base}/reports/expiring-licenses`, { params: params({ days }) }); }
   activeDevices() { return this.http.get<ActiveDevice[]>(`${this.base}/reports/active-devices`); }

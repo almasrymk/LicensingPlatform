@@ -22,7 +22,7 @@ public sealed class UserService(IAppDbContext db, ICurrentUser me, ITenantContex
     private IQueryable<User> Scoped()
     {
         var q = db.Users.AsQueryable();
-        if (scope.IsUnrestricted) return q;
+        if (scope.IsUnrestricted && scope.TenantId is null) return q;
         return scope.TenantId is { } tid ? q.Where(u => u.TenantId == tid) : q.Where(_ => false);
     }
 

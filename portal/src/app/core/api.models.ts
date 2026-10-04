@@ -29,7 +29,7 @@ export const Perm = {
 export type TenantStatus = 'Active' | 'Suspended';
 export interface Tenant {
   id: string; name: string; code: string; contactEmail?: string; status: TenantStatus; createdAt: string;
-  suspensionReason?: string; customers: number; users: number; activeLicenses: number;
+  suspensionReason?: string; customers: number; users: number; activeLicenses: number; products: number; licenses: number;
 }
 
 export type CustomerStatus = 'Active' | 'Inactive';
@@ -42,6 +42,7 @@ export interface CustomerDetails { customer: Customer; contacts: Contact[]; }
 
 export interface Product {
   id: string; tenantId: string; code: string; name: string; description?: string; isActive: boolean; createdAt: string; publishedPlans: number;
+  plans: number; licenses: number; platforms: string[];
 }
 
 export type PlanStatus = 'Draft' | 'Published' | 'Archived';
@@ -75,7 +76,7 @@ export interface License {
 }
 export interface Activation {
   id: string; licenseId: string; deviceId: string; deviceName?: string; appVersion?: string; status: 'Active' | 'Deactivated';
-  activatedAt: string; deactivatedAt?: string; lastHeartbeatAt?: string; lastIpAddress?: string;
+  activatedAt: string; deactivatedAt?: string; lastHeartbeatAt?: string; lastIpAddress?: string; operatingSystem?: string; online: boolean;
 }
 export interface LicenseDetails { license: License; activations: Activation[]; }
 export interface IssuedLicense { license: License; productKey: string; }
@@ -119,3 +120,20 @@ export interface FailedActivations {
 }
 export interface Usage { day: string; customerName: string; activeLicenses: number; activeDevices: number; successfulActivations: number; failedActivations: number; }
 export interface SigningKeys { keys: { kid: string; alg: string; status: string }[]; pem: { kid: string; status: string; publicKeyPem: string }[]; }
+
+// ---- Dashboard overview / trend, activations, key regeneration ----
+export interface Kpi { value: number; changePercent: number | null; }
+export interface ProductShare { productCode: string; productName: string; licenses: number; percent: number; }
+export interface RecentActivation { licenseId: string; customerName: string; productName: string; deviceId: string; deviceName?: string; ipAddress?: string; at: string; online: boolean; }
+export interface Attention { expiredLicenses: number; renewalsDue: number; limitReached: number; suspiciousActivations: number; }
+export interface Overview {
+  tenants: Kpi; customers: Kpi; activeLicenses: Kpi; subscriptions: Kpi; revenue: Kpi; currency: string; expiringSoon: number;
+  totalLicenses: number; licensesByProduct: ProductShare[]; recentActivations: RecentActivation[]; attention: Attention;
+}
+export interface TrendPoint { label: string; revenue: number; subscriptions: number; }
+export interface ActivationRow {
+  id: string; licenseId: string; licenseNumber: string; customerId: string; customerName: string; productCode: string; deviceId: string;
+  deviceName?: string; operatingSystem?: string; appVersion?: string; lastIpAddress?: string; status: 'Active' | 'Deactivated';
+  activatedAt: string; lastHeartbeatAt?: string; online: boolean;
+}
+export const Platforms = ['Windows', 'Linux', 'macOS', 'Android', 'iOS', 'Web'];

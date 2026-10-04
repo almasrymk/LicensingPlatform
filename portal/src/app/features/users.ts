@@ -1,5 +1,6 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { Api } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { Customer, Role, Tenant, User } from '../core/api.models';
@@ -16,7 +17,8 @@ import { Icon } from '../shared/icon';
       <button class="btn btn-primary" type="button" (click)="openNew()"><app-icon name="plus" [size]="16" />{{ 'users.new' | t }}</button>
     </app-page-head>
 
-    <div class="filters">
+    <div class="table-card">
+    <div class="filters" style="border:0;border-radius:0;box-shadow:none;border-bottom:1px solid var(--border);margin:0">
       <div class="search">
         <app-icon name="search" [size]="16" />
         <input type="search" [placeholder]="'common.search' | t" [ngModel]="search()" (ngModelChange)="search.set($event); page.set(1)" />
@@ -56,8 +58,9 @@ import { Icon } from '../shared/icon';
           </tbody>
         </table>
       </div>
-      <app-pager [(page)]="page" [total]="list.data()?.total ?? 0" />
+      <app-pager [(page)]="page" [(pageSize)]="pageSize" [total]="list.data()?.total ?? 0" />
     </app-state>
+    </div>
 
     <app-modal [(open)]="open" [title]="'users.new' | t">
       <form class="form" (ngSubmit)="create()">
@@ -105,10 +108,12 @@ export class UsersPage {
   readonly roles = computed<Role[]>(() => this.auth.isPlatformAdmin()
     ? ['PlatformAdmin', 'TenantAdmin', 'TenantOperator', 'CustomerUser']
     : ['TenantAdmin', 'TenantOperator', 'CustomerUser']);
-  readonly search = signal('');
+  private route = inject(ActivatedRoute);
+  readonly search = signal(this.route.snapshot.queryParamMap.get('search') ?? '');
   readonly role = signal('');
   readonly page = signal(1);
-  readonly list = loader(() => this.api.users({ search: this.search(), role: this.role(), page: this.page() }), false);
+  readonly pageSize = signal(10);
+  readonly list = loader(() => this.api.users({ search: this.search(), role: this.role(), page: this.page(), pageSize: this.pageSize() }), false);
 
   readonly open = signal(false);
   readonly tenants = signal<Tenant[]>([]);
@@ -120,7 +125,7 @@ export class UsersPage {
   newPassword = '';
 
   constructor() {
-    effect(() => { this.search(); this.role(); this.page(); this.list.load(); });
+    effect(() => { this.search(); this.role(); this.page(); this.pageSize(); this.list.load(); });
   }
 
   private ok() { this.toasts.success(this.i18n.t('common.saved')); }

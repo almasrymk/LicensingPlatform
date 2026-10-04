@@ -19,7 +19,8 @@ import { Icon } from '../shared/icon';
       }
     </app-page-head>
 
-    <div class="filters">
+    <div class="table-card">
+    <div class="filters" style="border:0;border-radius:0;box-shadow:none;border-bottom:1px solid var(--border);margin:0">
       <div class="search">
         <app-icon name="search" [size]="16" />
         <input type="search" [placeholder]="'common.search' | t" [ngModel]="search()" (ngModelChange)="search.set($event); page.set(1)" />
@@ -52,8 +53,9 @@ import { Icon } from '../shared/icon';
           </tbody>
         </table>
       </div>
-      <app-pager [(page)]="page" [total]="list.data()?.total ?? 0" />
+      <app-pager [(page)]="page" [(pageSize)]="pageSize" [total]="list.data()?.total ?? 0" />
     </app-state>
+    </div>
 
     <app-modal [(open)]="open" [title]="'subs.new' | t">
       <form class="form" (ngSubmit)="create()">
@@ -86,11 +88,12 @@ export class SubscriptionsPage implements OnInit {
   readonly auth = inject(AuthService);
 
   readonly statuses: SubscriptionStatus[] = ['Active', 'Trial', 'Suspended', 'Expired', 'Cancelled'];
-  readonly search = signal('');
-  readonly status = signal<SubscriptionStatus | ''>('');
+  readonly search = signal(this.route.snapshot.queryParamMap.get('search') ?? '');
+  readonly status = signal<SubscriptionStatus | ''>((this.route.snapshot.queryParamMap.get('status') as SubscriptionStatus | null) ?? '');
   readonly page = signal(1);
+  readonly pageSize = signal(10);
   readonly list = loader(() => this.api.subscriptions({
-    search: this.search(), status: this.status(), page: this.page(),
+    search: this.search(), status: this.status(), page: this.page(), pageSize: this.pageSize(),
     customerId: this.route.snapshot.queryParamMap.get('customerId'),
   }), false);
 
@@ -100,7 +103,7 @@ export class SubscriptionsPage implements OnInit {
   form = { customerId: '', planId: '', startDate: '', notes: '' };
 
   constructor() {
-    effect(() => { this.search(); this.status(); this.page(); this.list.load(); });
+    effect(() => { this.search(); this.status(); this.page(); this.pageSize(); this.list.load(); });
   }
 
   ngOnInit() {

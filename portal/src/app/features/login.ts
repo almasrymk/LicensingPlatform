@@ -5,46 +5,93 @@ import { AuthService } from '../core/auth.service';
 import { I18n, TranslatePipe } from '../core/i18n.service';
 import { Icon } from '../shared/icon';
 
-/** Login as in design page 1: deep blue gradient, translucent card, shield mark. */
+/** Split-screen login from the mockup: form on one side, blue product panel on the other. */
 @Component({
   selector: 'app-login',
   imports: [FormsModule, TranslatePipe, Icon],
   template: `
-    <div class="login-page">
-      <div>
-        <form class="login-card" (ngSubmit)="submit()" #f="ngForm">
-          <div class="login-head">
-            <span class="brand-mark big"><app-icon name="shield" [size]="28" /></span>
-            <h1>{{ 'login.title' | t }}</h1>
-            <p>{{ 'login.sub' | t }}</p>
-          </div>
+    <div class="login2">
+      <section class="form-side">
+        <div class="brand2"><span class="logo-cube"><app-icon name="cube" [size]="34" /></span><strong>Licensing Platform</strong></div>
+        <h1>{{ 'login.welcome' | t }}</h1>
+        <p class="lead">{{ 'login.lead' | t }}</p>
+
+        <form (ngSubmit)="submit()" #f="ngForm">
           <label class="field">
             <span>{{ 'login.email' | t }}</span>
-            <input type="email" name="email" autocomplete="username" dir="ltr" required [(ngModel)]="email" />
+            <div class="input-icon">
+              <app-icon name="user" [size]="16" />
+              <input type="email" name="email" autocomplete="username" dir="ltr" placeholder="name@company.com" required [(ngModel)]="email" />
+            </div>
           </label>
           <label class="field">
             <span>{{ 'login.password' | t }}</span>
-            <input type="password" name="password" autocomplete="current-password" dir="ltr" required [(ngModel)]="password" />
+            <div class="input-icon">
+              <app-icon name="lock" [size]="16" />
+              <input [type]="showPassword() ? 'text' : 'password'" name="password" autocomplete="current-password" dir="ltr" required [(ngModel)]="password" />
+              <button type="button" class="icon-btn eye" [attr.aria-label]="'login.showPassword' | t" (click)="showPassword.set(!showPassword())"><app-icon name="eye" [size]="16" /></button>
+            </div>
           </label>
-          <div class="login-row">
+          <div class="row">
             <label class="check"><input type="checkbox" name="remember" [(ngModel)]="remember" /> {{ 'login.remember' | t }}</label>
             <button type="button" class="link" (click)="forgot.set(!forgot())">{{ 'login.forgot' | t }}</button>
           </div>
-          @if (forgot()) { <p class="login-row">{{ 'login.forgotHint' | t }}</p> }
-          <button class="btn btn-primary block" type="submit" [disabled]="busy() || f.invalid">{{ 'login.submit' | t }}</button>
-          <button class="btn btn-ghost block" type="button" (click)="i18n.toggle()"><app-icon name="globe" />{{ 'nav.language' | t }}</button>
+          @if (forgot()) { <p class="hint">{{ 'login.forgotHint' | t }}</p> }
+          <button class="btn btn-primary block" type="submit" [disabled]="busy() || f.invalid">
+            {{ 'login.signIn' | t }} <app-icon name="arrowRight" class="flip" [size]="18" />
+          </button>
 
-          <details class="demo">
-            <summary>{{ 'login.demo' | t }}</summary>
-            <ul>
-              @for (d of demo; track d.email) {
-                <li><button type="button" class="link" (click)="fill(d.email, d.password)"><span dir="ltr">{{ d.email }}</span></button> — {{ 'role.' + d.role | t }}</li>
-              }
-            </ul>
-          </details>
+          <div class="or">{{ 'login.orContinue' | t }}</div>
+          <div class="sso">
+            <button class="btn" type="button" disabled [title]="'login.ssoSoon' | t">
+              <span class="ms-logo" aria-hidden="true"><i style="background:#f25022"></i><i style="background:#7fba00"></i><i style="background:#00a4ef"></i><i style="background:#ffb900"></i></span>Microsoft
+            </button>
+            <button class="btn" type="button" disabled [title]="'login.ssoSoon' | t"><span class="g-logo" aria-hidden="true">G</span>Google</button>
+          </div>
         </form>
-        <p class="login-foot" dir="ltr">Licensing Platform · RTL Ready</p>
-      </div>
+
+        <p class="contact">{{ 'login.noAccount' | t }} <a href="mailto:admin@licensing.local">{{ 'login.contactAdmin' | t }}</a></p>
+
+        <details class="demo">
+          <summary>{{ 'login.demo' | t }}</summary>
+          <ul>
+            @for (d of demo; track d.email) {
+              <li><button type="button" class="link" (click)="fill(d.email, d.password)"><span dir="ltr">{{ d.email }}</span></button> — {{ 'role.' + d.role | t }}</li>
+            }
+          </ul>
+        </details>
+
+        <nav class="foot">
+          <span>{{ 'login.privacy' | t }}</span><span>{{ 'login.terms' | t }}</span><span>{{ 'login.help' | t }}</span>
+          <button type="button" class="link" (click)="i18n.toggle()">{{ 'nav.language' | t }}</button>
+        </nav>
+      </section>
+
+      <section class="promo" aria-hidden="true">
+        <h2>{{ 'promo.title' | t }}</h2>
+        <p>{{ 'promo.lead' | t }}</p>
+        <ul>
+          <li><span class="tile"><app-icon name="users" /></span><div><strong>{{ 'promo.f1' | t }}</strong><small>{{ 'promo.f1s' | t }}</small></div></li>
+          <li><span class="tile"><app-icon name="key" /></span><div><strong>{{ 'promo.f2' | t }}</strong><small>{{ 'promo.f2s' | t }}</small></div></li>
+          <li><span class="tile"><app-icon name="shield" /></span><div><strong>{{ 'promo.f3' | t }}</strong><small>{{ 'promo.f3s' | t }}</small></div></li>
+          <li><span class="tile"><app-icon name="code" /></span><div><strong>{{ 'promo.f4' | t }}</strong><small>{{ 'promo.f4s' | t }}</small></div></li>
+        </ul>
+        <!-- Illustration: laptop with a protected license shield. -->
+        <svg class="art" viewBox="0 0 320 240" fill="none">
+          <defs>
+            <linearGradient id="sh" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#60a5fa"/><stop offset="1" stop-color="#2563eb"/></linearGradient>
+            <linearGradient id="lp" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e3a8a"/><stop offset="1" stop-color="#0b1640"/></linearGradient>
+          </defs>
+          <rect x="52" y="96" width="196" height="112" rx="10" fill="url(#lp)" stroke="#60a5fa" stroke-opacity=".6"/>
+          <rect x="64" y="108" width="172" height="88" rx="6" fill="#0b1f5c" stroke="#3b82f6" stroke-opacity=".5"/>
+          <circle cx="150" cy="152" r="22" stroke="#93c5fd" stroke-width="4"/>
+          <path d="M30 210h240l-18 16H48z" fill="#1e40af" stroke="#60a5fa" stroke-opacity=".6"/>
+          <path d="M210 30c18 0 30-8 38-14 8 6 20 14 38 14v34c0 30-22 44-38 50-16-6-38-20-38-50z" fill="url(#sh)" stroke="#bfdbfe" stroke-opacity=".8"/>
+          <path d="m233 66 11 11 21-21" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+          <rect x="10" y="60" width="42" height="42" rx="10" fill="#2563eb" fill-opacity=".55" stroke="#93c5fd" stroke-opacity=".6"/>
+          <rect x="270" y="150" width="40" height="40" rx="10" fill="#2563eb" fill-opacity=".55" stroke="#93c5fd" stroke-opacity=".6"/>
+        </svg>
+      </section>
     </div>
   `,
 })
@@ -59,6 +106,7 @@ export class Login {
   remember = true;
   readonly busy = signal(false);
   readonly forgot = signal(false);
+  readonly showPassword = signal(false);
 
   readonly demo = [
     { email: 'admin@licensing.local', password: 'Admin@12345', role: 'PlatformAdmin' },
@@ -75,8 +123,7 @@ export class Login {
     this.auth.login(this.email, this.password).subscribe({
       next: r => {
         this.i18n.set(r.user.language);
-        const target = this.route.snapshot.queryParamMap.get('returnUrl') ?? '/';
-        this.router.navigateByUrl(target);
+        this.router.navigateByUrl(this.route.snapshot.queryParamMap.get('returnUrl') ?? '/');
       },
       error: () => this.busy.set(false),
     });

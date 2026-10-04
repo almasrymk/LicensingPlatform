@@ -9,7 +9,7 @@ namespace Licensing.Application.Tenants;
 
 public sealed record TenantDto(
     Guid Id, string Name, string Code, string? ContactEmail, TenantStatus Status, DateTimeOffset CreatedAt,
-    string? SuspensionReason, int Customers, int Users, int ActiveLicenses);
+    string? SuspensionReason, int Customers, int Users, int ActiveLicenses, int Products, int Licenses);
 
 public sealed record CreateTenantRequest(string Name, string Code, string? ContactEmail);
 public sealed record UpdateTenantRequest(string Name, string? ContactEmail);
@@ -26,7 +26,9 @@ public sealed class TenantService(IAppDbContext db, ITenantContext scope, IAudit
         t.Id, t.Name, t.Code, t.ContactEmail, t.Status, t.CreatedAt, t.SuspensionReason,
         db.Customers.IgnoreQueryFilters().Count(c => c.TenantId == t.Id),
         db.Users.Count(u => u.TenantId == t.Id),
-        db.Licenses.IgnoreQueryFilters().Count(l => l.TenantId == t.Id && l.Status == LicenseStatus.Active)));
+        db.Licenses.IgnoreQueryFilters().Count(l => l.TenantId == t.Id && l.Status == LicenseStatus.Active),
+        db.Products.IgnoreQueryFilters().Count(p => p.TenantId == t.Id),
+        db.Licenses.IgnoreQueryFilters().Count(l => l.TenantId == t.Id)));
 
     public Task<PagedResult<TenantDto>> ListAsync(PageQuery page, TenantStatus? status, CancellationToken ct)
     {

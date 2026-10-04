@@ -8,8 +8,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Licensing.Application.Licensing;
 
-public sealed record ActivateRequest(string ProductKey, string DeviceId, string? DeviceName, string? ProductCode, string? AppVersion);
-public sealed record ValidateRequest(string ProductKey, string DeviceId, string? ProductCode, string? AppVersion);
+public sealed record ActivateRequest(string ProductKey, string DeviceId, string? DeviceName, string? ProductCode, string? AppVersion, string? Os = null);
+public sealed record ValidateRequest(string ProductKey, string DeviceId, string? ProductCode, string? AppVersion, string? Os = null);
 public sealed record DeactivateRequest(string ProductKey, string DeviceId);
 
 /// <summary>Response of activate, validate and heartbeat. <c>Token</c> lets the client keep working offline until <c>OfflineValidUntil</c>.</summary>
@@ -62,7 +62,7 @@ public sealed class DeviceLicensingService(
         if (existing is { Status: ActivationStatus.Active })
         {
             // Same device activating again is an idempotent success, not a new activation.
-            existing.Heartbeat(request.AppVersion, caller.IpAddress, now);
+            existing.Heartbeat(request.AppVersion, caller.IpAddress, now, request.Os);
             db.ActivationAttempts.Add(ActivationAttempt.Record(tenantId, license, prefix, deviceId, null, caller.IpAddress, now));
             await db.SaveChangesAsync(ct);
             return await RespondAsync(snapshot!, deviceId, now, alreadyActivated: true, ct);
@@ -74,9 +74,9 @@ public sealed class DeviceLicensingService(
         try
         {
             if (existing is not null)
-                existing.Reactivate(request.DeviceName, request.AppVersion, caller.IpAddress, now);
+                existing.Reactivate(request.DeviceName, request.AppVersion, caller.IpAddress, now, request.Os);
             else
-                db.LicenseActivations.Add(LicenseActivation.Create(license, deviceId, request.DeviceName, request.AppVersion, caller.IpAddress, now));
+                db.LicenseActivations.Add(LicenseActivation.Create(license, deviceId, request.DeviceName, request.AppVersion, caller.IpAddress, now, request.Os));
             db.ActivationAttempts.Add(ActivationAttempt.Record(tenantId, license, prefix, deviceId, null, caller.IpAddress, now));
             audit.Add("license.activated", "License", license.Id.ToString(), details: $"device={deviceId}", tenantId: tenantId);
             await db.SaveChangesAsync(ct);
@@ -130,7 +130,7 @@ public sealed class DeviceLicensingService(
             var activation = await db.LicenseActivations.FirstOrDefaultAsync(
                 a => a.LicenseId == snapshot.LicenseId && a.DeviceId == deviceId && a.Status == ActivationStatus.Active, ct);
             if (activation is null) return LicenseErrors.DeviceNotActivated;
-            activation.Heartbeat(request.AppVersion, caller.IpAddress, now);
+            activation.Heartbeat(request.AppVersion, caller.IpAddress, now, request.Os);
             await db.SaveChangesAsync(ct);
         }
 

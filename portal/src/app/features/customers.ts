@@ -1,6 +1,6 @@
 import { Component, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Api } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { CustomerStatus } from '../core/api.models';
@@ -19,7 +19,8 @@ import { Icon } from '../shared/icon';
       }
     </app-page-head>
 
-    <div class="filters">
+    <div class="table-card">
+    <div class="filters" style="border:0;border-radius:0;box-shadow:none;border-bottom:1px solid var(--border);margin:0">
       <div class="search">
         <app-icon name="search" [size]="16" />
         <input type="search" [placeholder]="'customers.searchPh' | t" [ngModel]="search()" (ngModelChange)="search.set($event); page.set(1)" />
@@ -56,8 +57,9 @@ import { Icon } from '../shared/icon';
           </tbody>
         </table>
       </div>
-      <app-pager [(page)]="page" [total]="list.data()?.total ?? 0" />
+      <app-pager [(page)]="page" [(pageSize)]="pageSize" [total]="list.data()?.total ?? 0" />
     </app-state>
+    </div>
 
     <app-modal [(open)]="open" [title]="'customers.new' | t">
       <form class="form" (ngSubmit)="create()">
@@ -83,15 +85,17 @@ export class CustomersPage {
   readonly router = inject(Router);
   readonly auth = inject(AuthService);
 
-  readonly search = signal('');
-  readonly status = signal<CustomerStatus | ''>('');
+  private route = inject(ActivatedRoute);
+  readonly search = signal(this.route.snapshot.queryParamMap.get('search') ?? '');
+  readonly status = signal<CustomerStatus | ''>((this.route.snapshot.queryParamMap.get('status') as CustomerStatus | null) ?? '');
   readonly page = signal(1);
-  readonly list = loader(() => this.api.customers({ search: this.search(), status: this.status(), page: this.page() }), false);
+  readonly pageSize = signal(10);
+  readonly list = loader(() => this.api.customers({ search: this.search(), status: this.status(), page: this.page(), pageSize: this.pageSize() }), false);
   readonly open = signal(false);
   form = { name: '', email: '', phone: '', country: '', taxNumber: '' };
 
   constructor() {
-    effect(() => { this.search(); this.status(); this.page(); this.list.load(); });
+    effect(() => { this.search(); this.status(); this.page(); this.pageSize(); this.list.load(); });
   }
 
   create() {

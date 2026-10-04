@@ -16,6 +16,23 @@ public sealed record DashboardDto(
 
 public sealed record DailyPointDto(DateOnly Day, int Successful, int Failed);
 
+/// <summary>A KPI with its change against the same figure 30 days ago (null when there is nothing to compare).</summary>
+public sealed record KpiDto(decimal Value, decimal? ChangePercent);
+
+public sealed record ProductShareDto(string ProductCode, string ProductName, int Licenses, decimal Percent);
+
+public sealed record RecentActivationDto(Guid LicenseId, string CustomerName, string ProductName, string DeviceId, string? DeviceName,
+    string? IpAddress, DateTimeOffset At, bool Online);
+
+public sealed record AttentionDto(int ExpiredLicenses, int RenewalsDue, int LimitReached, int SuspiciousActivations);
+
+/// <summary>Everything the dashboard shows in one call.</summary>
+public sealed record OverviewDto(
+    KpiDto Tenants, KpiDto Customers, KpiDto ActiveLicenses, KpiDto Subscriptions, KpiDto Revenue, string Currency, int ExpiringSoon,
+    int TotalLicenses, IReadOnlyList<ProductShareDto> LicensesByProduct, IReadOnlyList<RecentActivationDto> RecentActivations, AttentionDto Attention);
+
+public sealed record TrendPointDto(string Label, decimal Revenue, int Subscriptions);
+
 public sealed record ExpiringLicenseDto(Guid LicenseId, string LicenseNumber, Guid CustomerId, string CustomerName, string ProductCode,
     string PlanCode, DateTimeOffset ExpiresAt, int DaysLeft, int ActiveActivations);
 
@@ -73,6 +90,100 @@ public sealed class ReportService(IAppDbContext db, ITenantContext scope, TimePr
             attempts.Count(a => !a.Success && a.At >= since7),
             attempts.Count(a => a.Success && a.At >= since7),
             trend);
+    }
+
+    private static KpiDto Kpi(decimal now, decimal before) =>
+        new(now, before == 0 ? (now == 0 ? 0 : null) : Math.Round((now - before) / before * 100, 1));
+
+    private sealed record SubRow(SubscriptionStatus Status, DateTimeOffset StartDate, DateTimeOffset CreatedAt, DateTimeOffset? EndDate, decimal Price, string Currency);
+
+    private async Task<List<SubRow>> SubscriptionRowsAsync(CancellationToken ct) =>
+        (await (from s in db.Subscriptions
+                join p in db.Plans on s.PlanId equals p.Id
+                select new { s.Status, s.StartDate, s.CreatedAt, s.EndDate, p.Price.Amount, p.Price.Currency }).ToListAsync(ct))
+        .Select(x => new SubRow(x.Status, x.StartDate, x.CreatedAt, x.EndDate, x.Amount, x.Currency)).ToList();
+
+    /// <summary>
+    /// Dashboard overview. Revenue is the contract value of the subscriptions that are currently active (plan price);
+    /// billing is a later phase, so this is booked value, not collected money.
+    /// </summary>
+    public async Task<OverviewDto> OverviewAsync(CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var monthAgo = now.AddDays(-30);
+        var tenants = scope.IsUnrestricted && scope.TenantId is null ? db.Tenants : db.Tenants.Where(t => t.Id == scope.TenantId);
+        var customers = scope.CustomerId is { } cid ? db.Customers.Where(c => c.Id == cid) : db.Customers;
+
+        var subs = await SubscriptionRowsAsync(ct);
+        var running = subs.Where(s => s.Status is SubscriptionStatus.Active or SubscriptionStatus.Trial).ToList();
+        var runningBefore = running.Where(s => s.CreatedAt <= monthAgo).ToList();
+        var revenueNow = running.Where(s => s.Status == SubscriptionStatus.Active).Sum(s => s.Price);
+        var revenueBefore = runningBefore.Where(s => s.Status == SubscriptionStatus.Active).Sum(s => s.Price);
+        var currency = subs.GroupBy(s => s.Currency).OrderByDescending(g => g.Count()).Select(g => g.Key).FirstOrDefault() ?? "USD";
+
+        var activeLicenses = await db.Licenses.CountAsync(l => l.Status == LicenseStatus.Active, ct);
+        var activeLicensesBefore = await db.Licenses.CountAsync(l => l.Status == LicenseStatus.Active && l.IssuedAt <= monthAgo, ct);
+
+        var byProduct = await (from l in db.Licenses
+                               join p in db.Products on l.ProductId equals p.Id
+                               group l by new { l.ProductCode, p.Name } into g
+                               select new { g.Key.ProductCode, g.Key.Name, Count = g.Count() }).ToListAsync(ct);
+        var totalLicenses = byProduct.Sum(x => x.Count);
+        var shares = byProduct.OrderByDescending(x => x.Count)
+            .Select(x => new ProductShareDto(x.ProductCode, x.Name, x.Count, totalLicenses == 0 ? 0 : Math.Round(x.Count * 100m / totalLicenses, 0)))
+            .ToList();
+
+        var recentRaw = await (from a in db.LicenseActivations
+                               join l in db.Licenses on a.LicenseId equals l.Id
+                               join c in db.Customers on a.CustomerId equals c.Id
+                               join p in db.Products on l.ProductId equals p.Id
+                               orderby a.ActivatedAt descending
+                               select new { a.LicenseId, CustomerName = c.Name, ProductName = p.Name, a.DeviceId, a.DeviceName, a.LastIpAddress,
+                                   a.ActivatedAt, a.LastHeartbeatAt, a.Status, l.HeartbeatIntervalHours })
+            .Take(5).ToListAsync(ct);
+        var recent = recentRaw.Select(r => new RecentActivationDto(r.LicenseId, r.CustomerName, r.ProductName, r.DeviceId, r.DeviceName,
+            r.LastIpAddress, r.ActivatedAt,
+            r.Status == ActivationStatus.Active && r.LastHeartbeatAt is { } hb && hb >= now.AddHours(-2 * r.HeartbeatIntervalHours))).ToList();
+
+        var attention = new AttentionDto(
+            await db.Licenses.CountAsync(l => l.Status == LicenseStatus.Expired, ct),
+            running.Count(s => s.EndDate is { } end && end > now && end <= now.AddDays(30)),
+            await db.Licenses.CountAsync(l => l.Status == LicenseStatus.Active && l.MaxActivations != null && l.ActiveActivations >= l.MaxActivations, ct),
+            await db.ActivationAttempts.CountAsync(a => !a.Success && a.At >= now.AddDays(-7) &&
+                (scope.CustomerId == null || a.CustomerId == scope.CustomerId), ct));
+
+        return new OverviewDto(
+            Kpi(await tenants.CountAsync(t => t.Status == TenantStatus.Active, ct),
+                await tenants.CountAsync(t => t.Status == TenantStatus.Active && t.CreatedAt <= monthAgo, ct)),
+            Kpi(await customers.CountAsync(ct), await customers.CountAsync(c => c.CreatedAt <= monthAgo, ct)),
+            Kpi(activeLicenses, activeLicensesBefore),
+            Kpi(running.Count, runningBefore.Count),
+            Kpi(revenueNow, revenueBefore),
+            currency,
+            await db.Licenses.CountAsync(l => l.Status == LicenseStatus.Active && l.ExpiresAt != null && l.ExpiresAt > now && l.ExpiresAt <= now.AddDays(30), ct),
+            totalLicenses, shares, recent, attention);
+    }
+
+    /// <summary>
+    /// Revenue (non-trial plan value) and running subscriptions at the end of each month of a year ("monthly"),
+    /// or at the end of each of the last five years ("yearly"). Future months are empty.
+    /// </summary>
+    public async Task<IReadOnlyList<TrendPointDto>> TrendAsync(string granularity, int year, CancellationToken ct)
+    {
+        var subs = await SubscriptionRowsAsync(ct);
+        var now = clock.GetUtcNow();
+        var points = granularity == "yearly"
+            ? Enumerable.Range(now.Year - 4, 5).Select(y => (Label: y.ToString(), At: new DateTimeOffset(y, 12, 31, 23, 59, 59, TimeSpan.Zero)))
+            : Enumerable.Range(1, year == now.Year ? now.Month : 12)
+                .Select(m => (Label: m.ToString("00"), At: new DateTimeOffset(year, m, 1, 0, 0, 0, TimeSpan.Zero).AddMonths(1).AddSeconds(-1)));
+
+        // Months after the current one are not returned, so the chart ends at today.
+        return points.Select(p =>
+        {
+            var at = p.At > now ? now : p.At;
+            var running = subs.Where(s => s.StartDate <= at && (s.EndDate is null || s.EndDate > at) && s.Status != SubscriptionStatus.Cancelled).ToList();
+            return new TrendPointDto(p.Label, running.Where(s => s.Status != SubscriptionStatus.Trial).Sum(s => s.Price), running.Count);
+        }).ToList();
     }
 
     public async Task<IReadOnlyList<ExpiringLicenseDto>> ExpiringLicensesAsync(int days, CancellationToken ct)

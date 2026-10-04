@@ -43,6 +43,21 @@ export class I18n {
       : d.toLocaleDateString(locale, { dateStyle: 'medium' });
   }
 
+  /** "2 minutes ago", "3 hours ago"... */
+  ago(value?: string | null): string {
+    if (!value) return '—';
+    const minutes = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 60000));
+    if (minutes < 1) return this.t('time.justNow');
+    if (minutes < 60) return this.t('time.minutes', { n: minutes });
+    const hours = Math.round(minutes / 60);
+    if (hours < 48) return this.t('time.hours', { n: hours });
+    return this.t('time.days', { n: Math.round(hours / 24) });
+  }
+
+  money(value: number, currency: string): string {
+    return `${value.toLocaleString('en-US', { maximumFractionDigits: 0 })} ${currency}`;
+  }
+
   number(value: number | null | undefined): string {
     if (value === null || value === undefined) return '—';
     return value.toLocaleString('en-US'); // Latin digits in both languages, as in the design
@@ -63,6 +78,12 @@ export class TranslatePipe implements PipeTransform {
 export class LocalDatePipe implements PipeTransform {
   private i18n = inject(I18n);
   transform(value?: string | null, withTime = false): string { return this.i18n.date(value, withTime); }
+}
+
+@Pipe({ name: 'ago', pure: false })
+export class AgoPipe implements PipeTransform {
+  private i18n = inject(I18n);
+  transform(value?: string | null): string { return this.i18n.ago(value); }
 }
 
 @Pipe({ name: 'num', pure: false })

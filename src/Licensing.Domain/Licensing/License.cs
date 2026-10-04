@@ -133,6 +133,19 @@ public sealed class License : AggregateRoot, ICustomerOwned
         return true;
     }
 
+    /// <summary>
+    /// Replaces the product key (e.g. after a leak). Every device must activate again with the new key, so the caller
+    /// releases all activations; the old key stops working immediately.
+    /// </summary>
+    public void RegenerateKey(string productKeyHash, string productKeyPrefix)
+    {
+        if (Status == LicenseStatus.Revoked) throw new DomainException(LicenseErrors.InvalidTransition);
+        ProductKeyHash = productKeyHash;
+        ProductKeyPrefix = productKeyPrefix;
+        ActiveActivations = 0;
+        Raise(new LicenseStatusChangedV1(Id, TenantId, ProductKeyHash, Status));
+    }
+
     /// <summary>Follows the subscription when it is renewed (licenses expired with it come back).</summary>
     public void Reinstate(DateTimeOffset? expiresAt)
     {
@@ -161,8 +174,9 @@ public sealed class LicenseActivation : Entity, ICustomerOwned
     public DateTimeOffset? DeactivatedAt { get; private set; }
     public DateTimeOffset? LastHeartbeatAt { get; private set; }
     public string? LastIpAddress { get; private set; }
+    public string? OperatingSystem { get; private set; }
 
-    public static LicenseActivation Create(License license, string deviceId, string? deviceName, string? appVersion, string? ip, DateTimeOffset now) => new()
+    public static LicenseActivation Create(License license, string deviceId, string? deviceName, string? appVersion, string? ip, DateTimeOffset now, string? os = null) => new()
     {
         TenantId = license.TenantId,
         CustomerId = license.CustomerId,
@@ -174,10 +188,15 @@ public sealed class LicenseActivation : Entity, ICustomerOwned
         ActivatedAt = now,
         LastHeartbeatAt = now,
         LastIpAddress = ip,
+        OperatingSystem = Clip(os, 100),
     };
 
-    public void Reactivate(string? deviceName, string? appVersion, string? ip, DateTimeOffset now)
+    private static string? Clip(string? value, int max) =>
+        value?.Trim() is { Length: > 0 } v ? v[..Math.Min(v.Length, max)] : null;
+
+    public void Reactivate(string? deviceName, string? appVersion, string? ip, DateTimeOffset now, string? os = null)
     {
+        OperatingSystem = Clip(os, 100) ?? OperatingSystem;
         Status = ActivationStatus.Active;
         DeactivatedAt = null;
         ActivatedAt = now;
@@ -187,8 +206,9 @@ public sealed class LicenseActivation : Entity, ICustomerOwned
         LastIpAddress = ip;
     }
 
-    public void Heartbeat(string? appVersion, string? ip, DateTimeOffset now)
+    public void Heartbeat(string? appVersion, string? ip, DateTimeOffset now, string? os = null)
     {
+        OperatingSystem = Clip(os, 100) ?? OperatingSystem;
         LastHeartbeatAt = now;
         AppVersion = appVersion ?? AppVersion;
         LastIpAddress = ip;
