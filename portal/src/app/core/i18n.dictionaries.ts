@@ -1,7 +1,7 @@
 /* Translations. Keys are grouped by screen; status/enum values use "<group>.<Value>". */
 
 export const AR: Record<string, string> = {
-  'app.name': 'منصة إدارة التراخيص',
+  'app.name': 'LicenseHub',
   'app.tagline': 'إدارة المنتجات والاشتراكات والرخص',
 
   'nav.dashboard': 'لوحة التحكم', 'nav.tenants': 'الشركات', 'nav.customers': 'العملاء', 'nav.products': 'المنتجات',
@@ -205,7 +205,7 @@ export const AR: Record<string, string> = {
   'promo.f3s': 'أمان على مستوى المؤسسات وسجل تدقيق كامل',
   'promo.f4': 'واجهات API قوية',
   'promo.f4s': 'تكامل سهل مع برامجك',
-  'dash.welcome': 'مرحباً {name}، هذا ما يحدث في منصة التراخيص.',
+  'dash.welcome': 'مرحباً {name}، هذا ما يحدث في LicenseHub.',
   'k.totalTenants': 'إجمالي الشركات',
   'k.customers': 'العملاء',
   'k.activeLicenses': 'التراخيص النشطة',
@@ -356,7 +356,7 @@ export const AR: Record<string, string> = {
   'filter.date': 'التاريخ',
 };
 export const EN: Record<string, string> = {
-  'app.name': 'Licensing Platform',
+  'app.name': 'LicenseHub',
   'app.tagline': 'Products, subscriptions and licenses',
 
   'nav.dashboard': 'Dashboard', 'nav.tenants': 'Tenants', 'nav.customers': 'Customers', 'nav.products': 'Products',
@@ -560,7 +560,7 @@ export const EN: Record<string, string> = {
   'promo.f3s': 'Enterprise-grade security and audit logging',
   'promo.f4': 'Powerful APIs',
   'promo.f4s': 'Easy integration with your software products',
-  'dash.welcome': 'Welcome back, {name}. Here\'s what\'s happening with your licensing platform.',
+  'dash.welcome': 'Welcome back, {name}. Here\'s what\'s happening in LicenseHub.',
   'k.totalTenants': 'Total Tenants',
   'k.customers': 'Customers',
   'k.activeLicenses': 'Active Licenses',

@@ -12,7 +12,7 @@ import { Icon } from '../shared/icon';
   template: `
     <div class="login2">
       <section class="form-side">
-        <div class="brand2"><span class="logo-cube"><app-icon name="cube" [size]="34" /></span><strong>Licensing Platform</strong></div>
+        <div class="brand2"><img class="logo-mark" src="img/logo-mark.png" alt="" width="46" height="46" /><span><span class="wordmark" dir="ltr"><b>License</b><b class="hub">Hub</b></span><small dir="ltr">Licensing Platform</small></span></div>
         <h1>{{ 'login.welcome' | t }}</h1>
         <p class="lead">{{ 'login.lead' | t }}</p>
 

@@ -19,8 +19,7 @@ interface NavItem { path: string; label: string; icon: string; perms: string[]; 
       <header class="topbar">
         <div class="brandbar">
           <button class="icon-btn menu-btn" type="button" [attr.aria-label]="'nav.menu' | t" (click)="navOpen.set(!navOpen())"><app-icon name="menu" /></button>
-          <span class="logo-cube"><app-icon name="cube" [size]="28" /></span>
-          <strong>Licensing Platform</strong>
+          <a class="brand-link" routerLink="/dashboard" aria-label="LicenseHub"><img class="logo-mark" src="img/logo-mark.png" alt="" width="34" height="34" /><span class="wordmark" dir="ltr"><b>License</b><b class="hub">Hub</b></span></a>
         </div>
 
         <form class="topsearch" role="search" (submit)="$event.preventDefault(); search(q.value)">
