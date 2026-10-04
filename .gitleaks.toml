@@ -1,0 +1,7 @@
+# Development-only placeholders that are intentionally committed (clearly labelled DEV-ONLY / TEST-ONLY / demo).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented dev/test/demo values"
+regexes = ['''DEV-ONLY-[A-Za-z0-9-]+''', '''TEST-ONLY-[A-Za-z0-9-]+''', '''lcs_demo_[a-z]+_secret_change_me''']

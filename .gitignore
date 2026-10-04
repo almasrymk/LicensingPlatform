@@ -1,0 +1,28 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+*.trx
+coverage*/
+
+## Runtime secrets and keys (never commit)
+**/App_Data/
+appsettings.*.local.json
+*.pfx
+*.key
+
+## Node / Angular
+node_modules/
+dist/
+.angular/
+src/Licensing.Api/wwwroot/
+
+## OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
