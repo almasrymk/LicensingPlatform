@@ -76,21 +76,8 @@ import { Icon } from '../shared/icon';
           <li><span class="tile"><app-icon name="shield" /></span><div><strong>{{ 'promo.f3' | t }}</strong><small>{{ 'promo.f3s' | t }}</small></div></li>
           <li><span class="tile"><app-icon name="code" /></span><div><strong>{{ 'promo.f4' | t }}</strong><small>{{ 'promo.f4s' | t }}</small></div></li>
         </ul>
-        <!-- Illustration: laptop with a protected license shield. -->
-        <svg class="art" viewBox="0 0 320 240" fill="none">
-          <defs>
-            <linearGradient id="sh" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#60a5fa"/><stop offset="1" stop-color="#2563eb"/></linearGradient>
-            <linearGradient id="lp" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e3a8a"/><stop offset="1" stop-color="#0b1640"/></linearGradient>
-          </defs>
-          <rect x="52" y="96" width="196" height="112" rx="10" fill="url(#lp)" stroke="#60a5fa" stroke-opacity=".6"/>
-          <rect x="64" y="108" width="172" height="88" rx="6" fill="#0b1f5c" stroke="#3b82f6" stroke-opacity=".5"/>
-          <circle cx="150" cy="152" r="22" stroke="#93c5fd" stroke-width="4"/>
-          <path d="M30 210h240l-18 16H48z" fill="#1e40af" stroke="#60a5fa" stroke-opacity=".6"/>
-          <path d="M210 30c18 0 30-8 38-14 8 6 20 14 38 14v34c0 30-22 44-38 50-16-6-38-20-38-50z" fill="url(#sh)" stroke="#bfdbfe" stroke-opacity=".8"/>
-          <path d="m233 66 11 11 21-21" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-          <rect x="10" y="60" width="42" height="42" rx="10" fill="#2563eb" fill-opacity=".55" stroke="#93c5fd" stroke-opacity=".6"/>
-          <rect x="270" y="150" width="40" height="40" rx="10" fill="#2563eb" fill-opacity=".55" stroke="#93c5fd" stroke-opacity=".6"/>
-        </svg>
+        <!-- Artwork taken from the design board. -->
+        <img class="art" src="img/login-illustration.png" alt="" />
       </section>
     </div>
   `,

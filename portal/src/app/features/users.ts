@@ -8,10 +8,11 @@ import { I18n, LocalDatePipe, TranslatePipe } from '../core/i18n.service';
 import { Toasts } from '../core/toast.service';
 import { Modal, PageHead, Pager, StateView, StatusBadge, loader } from '../shared/ui';
 import { Icon } from '../shared/icon';
+import { Avatar, ImageUpload, lookupSignals } from '../shared/media';
 
 @Component({
   selector: 'app-users',
-  imports: [FormsModule, TranslatePipe, LocalDatePipe, StateView, StatusBadge, Pager, Modal, PageHead, Icon],
+  imports: [FormsModule, TranslatePipe, LocalDatePipe, StateView, StatusBadge, Pager, Modal, PageHead, Icon, Avatar, ImageUpload],
   template: `
     <app-page-head title="users.title" en="Users" subtitle="users.sub">
       <button class="btn btn-primary" type="button" (click)="openNew()"><app-icon name="plus" [size]="16" />{{ 'users.new' | t }}</button>
@@ -27,6 +28,20 @@ import { Icon } from '../shared/icon';
         <option value="">{{ 'common.all' | t }}</option>
         @for (r of roles(); track r) { <option [value]="r">{{ 'role.' + r | t }}</option> }
       </select>
+      <select [ngModel]="active()" (ngModelChange)="active.set($event); page.set(1)" [attr.aria-label]="'common.status' | t">
+        <option value="">{{ 'filter.allStatus' | t }}</option>
+        <option value="true">{{ 'filter.active' | t }}</option>
+        <option value="false">{{ 'filter.inactive' | t }}</option>
+      </select>
+      @if (auth.isPlatformAdmin()) {
+        <select [ngModel]="tenantId()" (ngModelChange)="tenantId.set($event); page.set(1)" [attr.aria-label]="'common.tenant' | t">
+          <option value="">{{ 'filter.allTenants' | t }}</option>
+          @for (t of lk.tenants(); track t.id) { <option [value]="t.id">{{ t.name }}</option> }
+        </select>
+      }
+      @if (search() || role() || active() || tenantId()) {
+        <button class="btn btn-sm btn-ghost" type="button" (click)="search.set(''); role.set(''); active.set(''); tenantId.set(''); page.set(1)">{{ 'filter.clear' | t }}</button>
+      }
     </div>
 
     <app-state [loading]="list.loading() && !list.data()" [error]="list.error()" [empty]="list.data()?.total === 0" (retry)="list.load()">
@@ -40,7 +55,7 @@ import { Icon } from '../shared/icon';
           <tbody>
             @for (u of list.data()?.items; track u.id) {
               <tr>
-                <td>{{ u.fullName }}</td>
+                <td><div class="name-cell"><app-avatar [src]="u.imageUrl" [name]="u.fullName" [size]="32" [round]="true" /><strong>{{ u.fullName }}</strong></div></td>
                 <td dir="ltr">{{ u.email }}</td>
                 <td>{{ 'role.' + u.role | t }}</td>
                 @if (auth.isPlatformAdmin()) { <td>{{ u.tenantName ?? '—' }}</td> }
@@ -48,6 +63,7 @@ import { Icon } from '../shared/icon';
                 <td><app-status [value]="u.isActive ? 'Active' : 'Disabled'" /></td>
                 <td>{{ u.lastLoginAt | date2: true }}</td>
                 <td class="actions">
+                  <button class="btn btn-ghost" type="button" (click)="photoTarget.set(u); photoOpen.set(true)">{{ 'img.photo' | t }}</button>
                   <button class="btn btn-ghost" type="button" (click)="pwdTarget.set(u); newPassword = ''; pwdOpen.set(true)">{{ 'users.resetPassword' | t }}</button>
                   @if (u.id !== auth.user()?.id) {
                     <button class="btn btn-ghost" type="button" (click)="setActive(u, !u.isActive)">{{ (u.isActive ? 'users.deactivate' : 'users.activate') | t }}</button>
@@ -91,6 +107,12 @@ import { Icon } from '../shared/icon';
       </form>
     </app-modal>
 
+    <app-modal [(open)]="photoOpen" [title]="('img.photo' | t) + ' — ' + (photoTarget()?.fullName ?? '')">
+      @if (photoTarget(); as u) {
+        <app-image-upload owner="users" [ownerId]="u.id" [url]="u.imageUrl" [name]="u.fullName" [round]="true" (changed)="list.load()" />
+      }
+    </app-modal>
+
     <app-modal [(open)]="pwdOpen" [title]="('users.resetPassword' | t) + ' — ' + (pwdTarget()?.email ?? '')">
       <form class="form" (ngSubmit)="resetPassword()">
         <label class="field"><span>{{ 'users.newPassword' | t }}</span><input name="np" type="password" dir="ltr" autocomplete="new-password" required [(ngModel)]="newPassword" /></label>
@@ -111,9 +133,14 @@ export class UsersPage {
   private route = inject(ActivatedRoute);
   readonly search = signal(this.route.snapshot.queryParamMap.get('search') ?? '');
   readonly role = signal('');
+  readonly active = signal('');
+  readonly tenantId = signal('');
+  readonly lk = lookupSignals();
+  readonly photoOpen = signal(false);
+  readonly photoTarget = signal<User | null>(null);
   readonly page = signal(1);
   readonly pageSize = signal(10);
-  readonly list = loader(() => this.api.users({ search: this.search(), role: this.role(), page: this.page(), pageSize: this.pageSize() }), false);
+  readonly list = loader(() => this.api.users({ search: this.search(), role: this.role(), active: this.active(), tenantId: this.tenantId(), page: this.page(), pageSize: this.pageSize() }), false);
 
   readonly open = signal(false);
   readonly tenants = signal<Tenant[]>([]);
@@ -125,7 +152,7 @@ export class UsersPage {
   newPassword = '';
 
   constructor() {
-    effect(() => { this.search(); this.role(); this.page(); this.pageSize(); this.list.load(); });
+    effect(() => { this.search(); this.role(); this.active(); this.tenantId(); this.page(); this.pageSize(); this.list.load(); });
   }
 
   private ok() { this.toasts.success(this.i18n.t('common.saved')); }

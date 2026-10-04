@@ -10,7 +10,7 @@ public sealed record AuditDto(
     string? EntityId, bool Success, string? Details, string? IpAddress, string? CorrelationId, DateTimeOffset At);
 
 public sealed record AuditQuery(int Page = 1, int PageSize = 50, string? Action = null, string? EntityType = null, string? EntityId = null,
-    bool? Success = null, DateTimeOffset? From = null, DateTimeOffset? To = null);
+    bool? Success = null, DateTimeOffset? From = null, DateTimeOffset? To = null, string? Actor = null, Guid? TenantId = null);
 
 public sealed class AuditQueryService(IAppDbContext db, ITenantContext scope, TimeProvider clock)
 {
@@ -24,6 +24,8 @@ public sealed class AuditQueryService(IAppDbContext db, ITenantContext scope, Ti
         if (!string.IsNullOrWhiteSpace(query.EntityType)) q = q.Where(a => a.EntityType == query.EntityType);
         if (!string.IsNullOrWhiteSpace(query.EntityId)) q = q.Where(a => a.EntityId == query.EntityId);
         if (query.Success is not null) q = q.Where(a => a.Success == query.Success);
+        if (!string.IsNullOrWhiteSpace(query.Actor)) q = q.Where(a => a.ActorName != null && a.ActorName.Contains(query.Actor));
+        if (query.TenantId is { } tid && scope.IsUnrestricted) q = q.Where(a => a.TenantId == tid);
         if (query.From is not null) q = q.Where(a => a.At >= query.From);
         if (query.To is not null) q = q.Where(a => a.At <= query.To);
 

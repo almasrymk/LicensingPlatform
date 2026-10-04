@@ -8,9 +8,12 @@ using Microsoft.EntityFrameworkCore;
 namespace Licensing.Application.Catalog;
 
 public sealed record ProductDto(Guid Id, Guid TenantId, string Code, string Name, string? Description, bool IsActive, DateTimeOffset CreatedAt,
-    int PublishedPlans, int Plans, int Licenses, IReadOnlyList<string> Platforms);
+    int PublishedPlans, int Plans, int Licenses, IReadOnlyList<string> Platforms, string? Icon, Guid? ImageId)
+{
+    public string ImageUrl => Media.MediaService.UrlFor(ImageId);
+}
 public sealed record SaveProductRequest(string Code, string Name, string? Description, bool IsActive = true, Guid? TenantId = null,
-    IReadOnlyList<string>? Platforms = null);
+    IReadOnlyList<string>? Platforms = null, string? Icon = null);
 
 public sealed record PlanDto(
     Guid Id, Guid TenantId, Guid ProductId, string ProductCode, string ProductName, string Code, string Name, int Version,
@@ -31,7 +34,8 @@ public sealed class CatalogService(IAppDbContext db, ICurrentUser me, ITenantCon
         db.Plans.Count(pl => pl.ProductId == p.Id && pl.Status == PlanStatus.Published),
         db.Plans.Count(pl => pl.ProductId == p.Id && pl.Status != PlanStatus.Archived),
         db.Licenses.Count(l => l.ProductId == p.Id),
-        p.PlatformsValue == "" ? new List<string>() : p.PlatformsValue.Split(';', StringSplitOptions.RemoveEmptyEntries).ToList()));
+        p.PlatformsValue == "" ? new List<string>() : p.PlatformsValue.Split(';', StringSplitOptions.RemoveEmptyEntries).ToList(),
+        p.Icon, p.ImageId));
 
     public Task<PagedResult<ProductDto>> ListProductsAsync(PageQuery page, CancellationToken ct)
     {
@@ -52,6 +56,7 @@ public sealed class CatalogService(IAppDbContext db, ICurrentUser me, ITenantCon
         var tenant = me.ResolveWriteTenant(scope, request.TenantId);
         if (tenant.IsFailure) return tenant.Error!;
         var product = Product.Create(tenant.Value, request.Code, request.Name, request.Description, clock.GetUtcNow(), request.Platforms);
+        product.SetIcon(request.Icon);
         if (await db.Products.IgnoreQueryFilters().AnyAsync(p => p.TenantId == tenant.Value && p.Code == product.Code, ct))
             return AppErrors.Duplicate("A product with this code");
         db.Products.Add(product);
@@ -65,6 +70,7 @@ public sealed class CatalogService(IAppDbContext db, ICurrentUser me, ITenantCon
         var product = await db.Products.FirstOrDefaultAsync(p => p.Id == id, ct);
         if (product is null) return AppErrors.NotFound("Product");
         product.Update(request.Name, request.Description, request.IsActive, request.Platforms);
+        if (request.Icon is not null) product.SetIcon(request.Icon == "" ? null : request.Icon);
         audit.Add("product.updated", "Product", id.ToString(), tenantId: product.TenantId);
         await db.SaveChangesAsync(ct);
         return await GetProductAsync(id, ct);

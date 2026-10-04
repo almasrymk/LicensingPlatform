@@ -72,10 +72,8 @@ public sealed class DbInitializer(
             await SeedDemoAsync(ct);
             logger.LogWarning("Demo data loaded. Demo accounts use the password documented in README; never enable Seed:DemoData in production");
         }
-        else if (o.DemoData)
-        {
+        if (o.DemoData)
             await BackfillDemoAsync(ct);
-        }
     }
 
     private static readonly Dictionary<string, string[]> DemoPlatforms = new()
@@ -94,7 +92,12 @@ public sealed class DbInitializer(
         _ => "Windows 11",
     };
 
-    /// <summary>Fills fields added after the demo data was first loaded (platforms, device OS). Idempotent.</summary>
+    private static readonly Dictionary<string, string> DemoIcons = new()
+    {
+        ["ACCOUNTING"] = "chart", ["POS"] = "card", ["SCHOOL"] = "users",
+    };
+
+    /// <summary>Fills fields added after the demo data was first loaded (platforms, device OS, product icons). Idempotent.</summary>
     private async Task BackfillDemoAsync(CancellationToken ct)
     {
         var changed = false;
@@ -102,6 +105,12 @@ public sealed class DbInitializer(
             if (DemoPlatforms.TryGetValue(product.Code, out var platforms))
             {
                 product.Update(product.Name, product.Description, product.IsActive, platforms);
+                changed = true;
+            }
+        foreach (var product in await db.Products.Where(p => p.Icon == null).ToListAsync(ct))
+            if (DemoIcons.TryGetValue(product.Code, out var icon))
+            {
+                product.SetIcon(icon);
                 changed = true;
             }
         foreach (var a in await db.LicenseActivations.Where(a => a.OperatingSystem == null).ToListAsync(ct))

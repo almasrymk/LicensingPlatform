@@ -12,7 +12,13 @@ public sealed record ContactDto(Guid Id, string Name, string? Email, string? Pho
 
 public sealed record CustomerDto(
     Guid Id, Guid TenantId, string? TenantName, string Name, string? Email, string? Phone, string? Country, string? TaxNumber,
-    CustomerStatus Status, DateTimeOffset CreatedAt, int ActiveSubscriptions, int ActiveLicenses);
+    CustomerStatus Status, DateTimeOffset CreatedAt, int ActiveSubscriptions, int ActiveLicenses, Guid? ImageId)
+{
+    public string ImageUrl => Media.MediaService.UrlFor(ImageId);
+}
+
+public sealed record CustomerFilter(CustomerStatus? Status = null, string? Country = null, Guid? TenantId = null,
+    DateTimeOffset? From = null, DateTimeOffset? To = null);
 
 public sealed record CustomerDetailsDto(CustomerDto Customer, IReadOnlyList<ContactDto> Contacts);
 
@@ -30,9 +36,10 @@ public sealed class CustomerService(IAppDbContext db, ICurrentUser me, ITenantCo
         c.Id, c.TenantId, db.Tenants.Where(t => t.Id == c.TenantId).Select(t => t.Name).FirstOrDefault(),
         c.Name, c.Email, c.Phone, c.Country, c.TaxNumber, c.Status, c.CreatedAt,
         db.Subscriptions.Count(s => s.CustomerId == c.Id && (s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.Trial)),
-        db.Licenses.Count(l => l.CustomerId == c.Id && l.Status == LicenseStatus.Active)));
+        db.Licenses.Count(l => l.CustomerId == c.Id && l.Status == LicenseStatus.Active),
+        c.ImageId));
 
-    public Task<PagedResult<CustomerDto>> ListAsync(PageQuery page, CustomerStatus? status, CancellationToken ct)
+    public Task<PagedResult<CustomerDto>> ListAsync(PageQuery page, CustomerFilter filter, CancellationToken ct)
     {
         var q = Scoped();
         if (!string.IsNullOrWhiteSpace(page.Search))
@@ -40,9 +47,16 @@ public sealed class CustomerService(IAppDbContext db, ICurrentUser me, ITenantCo
             var s = page.Search.Trim();
             q = q.Where(c => c.Name.Contains(s) || (c.Email != null && c.Email.Contains(s)) || (c.Phone != null && c.Phone.Contains(s)));
         }
-        if (status is not null) q = q.Where(c => c.Status == status);
+        if (filter.Status is not null) q = q.Where(c => c.Status == filter.Status);
+        if (!string.IsNullOrWhiteSpace(filter.Country)) q = q.Where(c => c.Country == filter.Country);
+        if (filter.TenantId is { } tid && scope.IsUnrestricted) q = q.Where(c => c.TenantId == tid);
+        if (filter.From is not null) q = q.Where(c => c.CreatedAt >= filter.From);
+        if (filter.To is not null) q = q.Where(c => c.CreatedAt <= filter.To);
         return Project(q.OrderBy(c => c.Name)).ToPagedAsync(page, ct);
     }
+
+    public async Task<IReadOnlyList<string>> CountriesAsync(CancellationToken ct) =>
+        await Scoped().Where(c => c.Country != null && c.Country != "").Select(c => c.Country!).Distinct().OrderBy(c => c).ToListAsync(ct);
 
     public async Task<Result<CustomerDetailsDto>> GetAsync(Guid id, CancellationToken ct)
     {

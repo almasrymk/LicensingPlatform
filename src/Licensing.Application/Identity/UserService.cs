@@ -8,7 +8,12 @@ namespace Licensing.Application.Identity;
 
 public sealed record UserDto(
     Guid Id, string Email, string FullName, string Role, Guid? TenantId, string? TenantName,
-    Guid? CustomerId, string? CustomerName, bool IsActive, DateTimeOffset? LastLoginAt, DateTimeOffset CreatedAt);
+    Guid? CustomerId, string? CustomerName, bool IsActive, DateTimeOffset? LastLoginAt, DateTimeOffset CreatedAt, Guid? ImageId)
+{
+    public string ImageUrl => Media.MediaService.UrlFor(ImageId);
+}
+
+public sealed record UserFilter(string? Role = null, bool? Active = null, Guid? TenantId = null);
 
 public sealed record CreateUserRequest(string Email, string FullName, string Password, string Role, Guid? TenantId, Guid? CustomerId);
 public sealed record UpdateUserRequest(string FullName, string? Role);
@@ -26,19 +31,21 @@ public sealed class UserService(IAppDbContext db, ICurrentUser me, ITenantContex
         return scope.TenantId is { } tid ? q.Where(u => u.TenantId == tid) : q.Where(_ => false);
     }
 
-    public async Task<PagedResult<UserDto>> ListAsync(PageQuery page, string? role, CancellationToken ct)
+    public async Task<PagedResult<UserDto>> ListAsync(PageQuery page, UserFilter filter, CancellationToken ct)
     {
         var q = Scoped();
         if (!string.IsNullOrWhiteSpace(page.Search))
             q = q.Where(u => u.Email.Contains(page.Search) || u.FullName.Contains(page.Search));
-        if (!string.IsNullOrWhiteSpace(role)) q = q.Where(u => u.Role == role);
+        if (!string.IsNullOrWhiteSpace(filter.Role)) q = q.Where(u => u.Role == filter.Role);
+        if (filter.Active is not null) q = q.Where(u => u.IsActive == filter.Active);
+        if (filter.TenantId is { } tid && scope.IsUnrestricted) q = q.Where(u => u.TenantId == tid);
 
         var result = await q.OrderBy(u => u.Role).ThenBy(u => u.FullName)
             .Select(u => new UserDto(u.Id, u.Email, u.FullName, u.Role, u.TenantId,
                 db.Tenants.Where(t => t.Id == u.TenantId).Select(t => t.Name).FirstOrDefault(),
                 u.CustomerId,
                 db.Customers.Where(c => c.Id == u.CustomerId).Select(c => c.Name).FirstOrDefault(),
-                u.IsActive, u.LastLoginAt, u.CreatedAt))
+                u.IsActive, u.LastLoginAt, u.CreatedAt, u.ImageId))
             .ToPagedAsync(page, ct);
         return result;
     }
@@ -95,7 +102,7 @@ public sealed class UserService(IAppDbContext db, ICurrentUser me, ITenantContex
                 db.Tenants.Where(t => t.Id == u.TenantId).Select(t => t.Name).FirstOrDefault(),
                 u.CustomerId,
                 db.Customers.Where(c => c.Id == u.CustomerId).Select(c => c.Name).FirstOrDefault(),
-                u.IsActive, u.LastLoginAt, u.CreatedAt))
+                u.IsActive, u.LastLoginAt, u.CreatedAt, u.ImageId))
             .FirstOrDefaultAsync(ct);
 
     public async Task<Result<UserDto>> UpdateAsync(Guid id, UpdateUserRequest request, CancellationToken ct)

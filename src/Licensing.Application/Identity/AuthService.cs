@@ -14,7 +14,7 @@ public sealed record ClientTokenRequest(string ClientId, string ClientSecret);
 
 public sealed record UserProfile(
     Guid Id, string Email, string FullName, string Role, Guid? TenantId, string? TenantName,
-    Guid? CustomerId, string? CustomerName, IReadOnlyList<string> Permissions, string Language);
+    Guid? CustomerId, string? CustomerName, IReadOnlyList<string> Permissions, string Language, string ImageUrl = "");
 
 public sealed record AuthResponse(string AccessToken, DateTimeOffset ExpiresAt, string RefreshToken, UserProfile User);
 public sealed record ClientTokenResponse(string AccessToken, string TokenType, int ExpiresIn, string Scope);
@@ -190,7 +190,7 @@ public sealed class AuthService(
         if (user.CustomerId is { } cid)
             customerName = await db.Customers.IgnoreQueryFilters().Where(c => c.Id == cid).Select(c => c.Name).FirstOrDefaultAsync(ct);
         return new UserProfile(user.Id, user.Email, user.FullName, user.Role, user.TenantId, tenantName,
-            user.CustomerId, customerName, Permissions.ForRole(user.Role), user.PreferredLanguage);
+            user.CustomerId, customerName, Permissions.ForRole(user.Role), user.PreferredLanguage, Media.MediaService.UrlFor(user.ImageId));
     }
 
     private async Task<bool> TenantIsActiveAsync(Guid? tenantId, CancellationToken ct) =>

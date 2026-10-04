@@ -9,6 +9,7 @@ import { Toasts } from '../core/toast.service';
 import { Donut } from '../shared/charts';
 import { Icon } from '../shared/icon';
 import { StateView, StatusBadge, loader } from '../shared/ui';
+import { Avatar, ImageUpload } from '../shared/media';
 
 type Tab = 'overview' | 'users' | 'customers' | 'subscriptions' | 'licenses';
 
@@ -20,20 +21,23 @@ interface TenantData {
 /** Tenant details from the mockup: header with status, tabs, KPI tiles, products used, subscription status donut. */
 @Component({
   selector: 'app-tenant-details',
-  imports: [RouterLink, TranslatePipe, LocalNumberPipe, LocalDatePipe, StateView, StatusBadge, Icon, Donut],
+  imports: [RouterLink, TranslatePipe, LocalNumberPipe, LocalDatePipe, StateView, StatusBadge, Icon, Donut, Avatar, ImageUpload],
   template: `
     <app-state [loading]="data.loading() && !data.data()" [error]="data.error()" (retry)="data.load()">
       @if (data.data(); as d) {
         <nav class="crumbs"><a routerLink="/tenants">{{ 'nav.tenants' | t }}</a><span>/</span><span>{{ d.tenant.name }}</span></nav>
         <header class="page-head">
           <div class="entity-head">
-            <span class="tile blue"><app-icon name="building" [size]="24" /></span>
+            <app-avatar [src]="logo() ?? d.tenant.imageUrl" [name]="d.tenant.name" icon="building" [size]="56" />
             <div>
               <h1>{{ d.tenant.name }} <app-status [value]="d.tenant.status" /></h1>
               <p><span class="mono" dir="ltr">{{ d.tenant.code }}</span> · {{ 'td.since' | t: { date: (d.tenant.createdAt | date2) } }}</p>
             </div>
           </div>
           <div class="actions">
+            @if (auth.can(auth.perm.TenantsManage)) {
+              <button class="btn" type="button" (click)="editLogo.set(!editLogo())"><app-icon name="edit" [size]="16" />{{ 'img.title' | t }}</button>
+            }
             <button class="btn" type="button" (click)="auth.setTenantScope(d.tenant.id)"><app-icon name="eye" [size]="16" />{{ 'td.viewData' | t }}</button>
             @if (auth.can(auth.perm.TenantsManage)) {
               @if (d.tenant.status === 'Active') {
@@ -45,6 +49,9 @@ interface TenantData {
           </div>
         </header>
 
+        @if (editLogo()) {
+          <div class="card" style="margin-bottom:16px"><app-image-upload owner="tenants" [ownerId]="d.tenant.id" [url]="logo() ?? d.tenant.imageUrl" [name]="d.tenant.name" (changed)="logo.set($event)" /></div>
+        }
         <div class="tabs" role="tablist">
           @for (t of tabs; track t.id) {
             <button type="button" role="tab" [class.active]="tab() === t.id" [attr.aria-selected]="tab() === t.id" (click)="tab.set(t.id)">{{ t.label | t }}</button>
@@ -64,7 +71,7 @@ interface TenantData {
                 <h2>{{ 'td.productsUsed' | t }}</h2>
                 @for (p of d.products.items; track p.id; let i = $index) {
                   <div class="usage-row">
-                    <span class="tile sm" [class]="'tile sm ' + tone(i)"><app-icon name="cube" /></span>
+                    <app-avatar [src]="p.imageUrl" [name]="p.name" [icon]="p.icon || 'cube'" [size]="36" [tone]="tone(i)" />
                     <div><strong>{{ p.name }}</strong><small>{{ 'products.plansN' | t: { n: p.plans } }}</small></div>
                     <small dir="ltr">{{ p.licenses }} / {{ maxLicenses() }} {{ 'col.licenses' | t }}</small>
                     <div class="bar"><span [class]="['', 'green', 'violet'][i % 3]" [style.width.%]="(p.licenses / maxLicenses()) * 100"></span></div>
@@ -89,7 +96,7 @@ interface TenantData {
               <thead><tr><th>{{ 'col.name' | t }}</th><th>{{ 'common.email' | t }}</th><th>{{ 'users.role' | t }}</th><th>{{ 'col.status' | t }}</th><th>{{ 'users.lastLogin' | t }}</th></tr></thead>
               <tbody>
                 @for (u of d.users.items; track u.id) {
-                  <tr><td><strong>{{ u.fullName }}</strong></td><td dir="ltr">{{ u.email }}</td><td>{{ 'role.' + u.role | t }}</td>
+                  <tr><td><div class="name-cell"><app-avatar [src]="u.imageUrl" [name]="u.fullName" [size]="30" [round]="true" /><strong>{{ u.fullName }}</strong></div></td><td dir="ltr">{{ u.email }}</td><td>{{ 'role.' + u.role | t }}</td>
                     <td><app-status [value]="u.isActive ? 'Active' : 'Disabled'" /></td><td>{{ u.lastLoginAt | date2: true }}</td></tr>
                 } @empty { <tr><td colspan="5" class="muted">{{ 'common.empty' | t }}</td></tr> }
               </tbody>
@@ -100,7 +107,7 @@ interface TenantData {
               <thead><tr><th>{{ 'col.name' | t }}</th><th>{{ 'common.email' | t }}</th><th>{{ 'common.country' | t }}</th><th>{{ 'col.licenses' | t }}</th><th>{{ 'col.status' | t }}</th></tr></thead>
               <tbody>
                 @for (c of d.customers.items; track c.id) {
-                  <tr><td><strong>{{ c.name }}</strong></td><td dir="ltr">{{ c.email ?? '—' }}</td><td>{{ c.country ?? '—' }}</td><td>{{ c.activeLicenses }}</td><td><app-status [value]="c.status" /></td></tr>
+                  <tr><td><div class="name-cell"><app-avatar [src]="c.imageUrl" [name]="c.name" [size]="30" [round]="true" tone="green" /><strong>{{ c.name }}</strong></div></td><td dir="ltr">{{ c.email ?? '—' }}</td><td>{{ c.country ?? '—' }}</td><td>{{ c.activeLicenses }}</td><td><app-status [value]="c.status" /></td></tr>
                 } @empty { <tr><td colspan="5" class="muted">{{ 'common.empty' | t }}</td></tr> }
               </tbody>
             </table></div></div>
@@ -145,6 +152,8 @@ export class TenantDetailsPage implements OnInit {
     { id: 'subscriptions', label: 'nav.subscriptions' }, { id: 'licenses', label: 'nav.licenses' },
   ];
   readonly tab = signal<Tab>('overview');
+  readonly editLogo = signal(false);
+  readonly logo = signal<string | null>(null);
 
   // A platform admin reads one tenant's data through the explicit X-Tenant-Id scope.
   readonly data = loader<TenantData>(() => forkJoin({

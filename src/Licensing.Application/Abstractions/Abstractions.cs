@@ -33,6 +33,7 @@ public interface IAppDbContext
     DbSet<Webhook> Webhooks { get; }
     DbSet<AuditRecord> AuditRecords { get; }
     DbSet<global::Licensing.Domain.Reporting.UsageDaily> UsageDaily { get; }
+    DbSet<global::Licensing.Domain.Media.MediaFile> MediaFiles { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 

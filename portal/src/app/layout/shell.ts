@@ -42,7 +42,8 @@ interface NavItem { path: string; label: string; icon: string; perms: string[]; 
           <button class="lang-btn" type="button" (click)="i18n.toggle()"><app-icon name="globe" [size]="18" />{{ 'nav.language' | t }}<app-icon name="chevronDown" [size]="14" /></button>
           <a class="icon-btn" routerLink="/settings" [attr.aria-label]="'nav.settings' | t"><app-icon name="settings" [size]="20" /></a>
           <button class="user-chip" type="button" (click)="menuOpen.set(!menuOpen()); $event.stopPropagation()" aria-haspopup="menu" [attr.aria-expanded]="menuOpen()">
-            <span class="avatar">{{ initial() }}</span>
+            @if (auth.user()?.imageUrl) { <img class="avatar" [src]="auth.user()!.imageUrl" alt="" style="object-fit:cover;padding:0" /> }
+            @else { <span class="avatar">{{ initial() }}</span> }
             <span class="who"><strong>{{ auth.user()?.fullName }}</strong><small>{{ 'role.' + auth.user()?.role | t }}</small></span>
             <app-icon name="chevronDown" [size]="16" />
             @if (menuOpen()) {

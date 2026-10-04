@@ -40,6 +40,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<Webhook> Webhooks => Set<Webhook>();
     public DbSet<AuditRecord> AuditRecords => Set<AuditRecord>();
     public DbSet<UsageDaily> UsageDaily => Set<UsageDaily>();
+    public DbSet<Licensing.Domain.Media.MediaFile> MediaFiles => Set<Licensing.Domain.Media.MediaFile>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();

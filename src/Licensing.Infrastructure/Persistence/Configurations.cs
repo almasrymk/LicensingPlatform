@@ -90,6 +90,7 @@ internal sealed class ProductConfig : IEntityTypeConfiguration<Product>
         b.Property(x => x.Name).HasMaxLength(200);
         b.Property(x => x.Description).HasMaxLength(1000);
         b.Property(x => x.PlatformsValue).HasColumnName("Platforms").HasMaxLength(200).HasDefaultValue("");
+        b.Property(x => x.Icon).HasMaxLength(32);
         b.Ignore(x => x.Platforms);
         b.Ignore(x => x.DomainEvents);
     }
@@ -255,6 +256,19 @@ internal sealed class UsageDailyConfig : IEntityTypeConfiguration<UsageDaily>
     {
         b.ToTable("UsageDaily", "reporting");
         b.HasIndex(x => new { x.TenantId, x.CustomerId, x.Day }).IsUnique();
+    }
+}
+
+internal sealed class MediaFileConfig : IEntityTypeConfiguration<Licensing.Domain.Media.MediaFile>
+{
+    public void Configure(EntityTypeBuilder<Licensing.Domain.Media.MediaFile> b)
+    {
+        b.ToTable("MediaFiles", "media");
+        b.HasIndex(x => new { x.OwnerType, x.OwnerId });
+        b.Property(x => x.OwnerType).HasMaxLength(16);
+        b.Property(x => x.ContentType).HasMaxLength(32);
+        b.Property(x => x.FileName).HasMaxLength(200);
+        b.Property(x => x.Data).HasMaxLength(-1);
     }
 }
 

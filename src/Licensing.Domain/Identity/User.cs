@@ -25,6 +25,11 @@ public sealed class User : AggregateRoot
     public DateTimeOffset? LastLoginAt { get; private set; }
     public string PreferredLanguage { get; private set; } = "ar";
 
+    /// <summary>Uploaded logo/photo (see MediaFile), or null.</summary>
+    public Guid? ImageId { get; private set; }
+
+    public void SetImage(Guid? imageId) => ImageId = imageId;
+
     public static User CreatePlatformAdmin(string email, string fullName, string passwordHash, DateTimeOffset now) =>
         Create(null, null, email, fullName, passwordHash, Roles.PlatformAdmin, now);
 

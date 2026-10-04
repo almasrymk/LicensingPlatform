@@ -1,4 +1,4 @@
-import { Component, OnInit, effect, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Api } from '../core/api.service';
@@ -8,6 +8,7 @@ import { I18n, LocalDatePipe, LocalNumberPipe, TranslatePipe } from '../core/i18
 import { Toasts } from '../core/toast.service';
 import { Modal, PageHead, Pager, StateView, StatusBadge, loader } from '../shared/ui';
 import { Icon } from '../shared/icon';
+import { lookupSignals } from '../shared/media';
 
 @Component({
   selector: 'app-subscriptions',
@@ -29,6 +30,25 @@ import { Icon } from '../shared/icon';
         <option value="">{{ 'common.all' | t }}</option>
         @for (s of statuses; track s) { <option [value]="s">{{ 'status.' + s | t }}</option> }
       </select>
+      <select [ngModel]="productId()" (ngModelChange)="productId.set($event); planId.set(''); page.set(1)" [attr.aria-label]="'common.product' | t">
+        <option value="">{{ 'filter.allProducts' | t }}</option>
+        @for (p of lk.products(); track p.id) { <option [value]="p.id">{{ p.name }}</option> }
+      </select>
+      <select [ngModel]="planId()" (ngModelChange)="planId.set($event); page.set(1)" [attr.aria-label]="'common.plan' | t">
+        <option value="">{{ 'filter.allPlans' | t }}</option>
+        @for (p of planOptions(); track p.id) { <option [value]="p.id">{{ p.name }} v{{ p.version }}</option> }
+      </select>
+      @if (auth.isPlatformAdmin()) {
+        <select [ngModel]="tenantId()" (ngModelChange)="tenantId.set($event); page.set(1)" [attr.aria-label]="'common.tenant' | t">
+          <option value="">{{ 'filter.allTenants' | t }}</option>
+          @for (t of lk.tenants(); track t.id) { <option [value]="t.id">{{ t.name }}</option> }
+        </select>
+      }
+      <label class="date-pair"><span>{{ 'filter.endFrom' | t }}</span><input type="date" [ngModel]="endFrom()" (ngModelChange)="endFrom.set($event); page.set(1)" />
+        <span>{{ 'filter.to' | t }}</span><input type="date" [ngModel]="endTo()" (ngModelChange)="endTo.set($event); page.set(1)" /></label>
+      @if (search() || status() || productId() || planId() || tenantId() || endFrom() || endTo()) {
+        <button class="btn btn-sm btn-ghost" type="button" (click)="clear()">{{ 'filter.clear' | t }}</button>
+      }
     </div>
 
     <app-state [loading]="list.loading() && !list.data()" [error]="list.error()" [empty]="list.data()?.total === 0" (retry)="list.load()">
@@ -90,10 +110,18 @@ export class SubscriptionsPage implements OnInit {
   readonly statuses: SubscriptionStatus[] = ['Active', 'Trial', 'Suspended', 'Expired', 'Cancelled'];
   readonly search = signal(this.route.snapshot.queryParamMap.get('search') ?? '');
   readonly status = signal<SubscriptionStatus | ''>((this.route.snapshot.queryParamMap.get('status') as SubscriptionStatus | null) ?? '');
+  readonly lk = lookupSignals();
+  readonly productId = signal(this.route.snapshot.queryParamMap.get('productId') ?? '');
+  readonly planId = signal('');
+  readonly tenantId = signal('');
+  readonly planOptions = computed(() => this.lk.plans().filter(p => !this.productId() || p.productId === this.productId()));
+  readonly endFrom = signal('');
+  readonly endTo = signal('');
   readonly page = signal(1);
   readonly pageSize = signal(10);
   readonly list = loader(() => this.api.subscriptions({
     search: this.search(), status: this.status(), page: this.page(), pageSize: this.pageSize(),
+    productId: this.productId(), planId: this.planId(), tenantId: this.tenantId(), endFrom: this.endFrom(), endTo: this.endTo(),
     customerId: this.route.snapshot.queryParamMap.get('customerId'),
   }), false);
 
@@ -102,8 +130,13 @@ export class SubscriptionsPage implements OnInit {
   readonly plans = signal<Plan[]>([]);
   form = { customerId: '', planId: '', startDate: '', notes: '' };
 
+  clear() {
+    this.search.set(''); this.status.set(''); this.productId.set(''); this.planId.set(''); this.tenantId.set('');
+    this.endFrom.set(''); this.endTo.set(''); this.page.set(1);
+  }
+
   constructor() {
-    effect(() => { this.search(); this.status(); this.page(); this.pageSize(); this.list.load(); });
+    effect(() => { this.search(); this.status(); this.productId(); this.planId(); this.tenantId(); this.endFrom(); this.endTo(); this.page(); this.pageSize(); this.list.load(); });
   }
 
   ngOnInit() {

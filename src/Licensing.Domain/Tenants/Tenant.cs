@@ -20,6 +20,11 @@ public sealed class Tenant : AggregateRoot
     public DateTimeOffset? SuspendedAt { get; private set; }
     public string? SuspensionReason { get; private set; }
 
+    /// <summary>Uploaded logo/photo (see MediaFile), or null.</summary>
+    public Guid? ImageId { get; private set; }
+
+    public void SetImage(Guid? imageId) => ImageId = imageId;
+
     public static Tenant Create(string name, string code, string? contactEmail, DateTimeOffset now)
     {
         var tenant = new Tenant

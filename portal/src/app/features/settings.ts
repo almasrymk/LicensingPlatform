@@ -5,16 +5,20 @@ import { AuthService } from '../core/auth.service';
 import { I18n, Lang, TranslatePipe } from '../core/i18n.service';
 import { Toasts } from '../core/toast.service';
 import { PageHead } from '../shared/ui';
+import { ImageUpload } from '../shared/media';
 
 @Component({
   selector: 'app-settings',
-  imports: [FormsModule, TranslatePipe, PageHead],
+  imports: [FormsModule, TranslatePipe, PageHead, ImageUpload],
   template: `
     <app-page-head title="settings.title" en="Settings" subtitle="settings.sub">
     </app-page-head>
     <div class="grid-2">
       <section class="card">
         <h2>{{ 'settings.profile' | t }}</h2>
+        <div class="field"><span>{{ 'img.photo' | t }}</span>
+          <app-image-upload owner="me" [url]="auth.user()?.imageUrl" [name]="auth.user()?.fullName ?? ''" [round]="true" (changed)="auth.updateProfile({ imageUrl: $event })" />
+        </div>
         <dl class="dl">
           <dt>{{ 'users.fullName' | t }}</dt><dd>{{ auth.user()?.fullName }}</dd>
           <dt>{{ 'common.email' | t }}</dt><dd dir="ltr">{{ auth.user()?.email }}</dd>

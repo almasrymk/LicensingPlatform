@@ -2,7 +2,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import {
   ActiveDevice, ApiClient, ApiClientSecret, AuditRecord, AuthResponse, CustomerDetails, Customer, CustomerStatus, Dashboard,
-  ExpiringLicense, FailedActivations, Overview, TrendPoint, ActivationRow, IssuedLicense, License, LicenseDetails, Paged, Plan, Product, SavePlan, SigningKeys,
+  ExpiringLicense, FailedActivations, Overview, TrendPoint, ActivationRow, ImageOwner, IssuedLicense, License, LicenseDetails, Paged, Plan, Product, SavePlan, SigningKeys,
   Subscription, SubscriptionDetails, Tenant, Usage, User, UserProfile,
 } from './api.models';
 
@@ -50,8 +50,8 @@ export class Api {
 
   // Catalog
   products(q?: Query) { return this.http.get<Paged<Product>>(`${this.base}/products`, { params: params(q) }); }
-  createProduct(body: { code: string; name: string; description?: string; tenantId?: string; platforms?: string[] }) { return this.http.post<Product>(`${this.base}/products`, body); }
-  updateProduct(id: string, body: { code: string; name: string; description?: string; isActive: boolean; platforms?: string[] }) {
+  createProduct(body: { code: string; name: string; description?: string; tenantId?: string; platforms?: string[]; icon?: string | null }) { return this.http.post<Product>(`${this.base}/products`, body); }
+  updateProduct(id: string, body: { code: string; name: string; description?: string; isActive: boolean; platforms?: string[]; icon?: string | null }) {
     return this.http.put<Product>(`${this.base}/products/${id}`, body);
   }
   plans(q?: Query) { return this.http.get<Paged<Plan>>(`${this.base}/plans`, { params: params(q) }); }
@@ -113,6 +113,20 @@ export class Api {
   scoped<T>(tenantId: string, path: string, q?: Query) {
     return this.http.get<T>(`${this.base}/${path}`, { params: params(q), headers: { 'X-Tenant-Id': tenantId } });
   }
+  /** Uploads a logo/photo (multipart). Returns the new image URL. */
+  uploadImage(owner: ImageOwner, id: string, file: File) {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return this.http.put<{ id: string; url: string }>(`${this.base}/${owner}/${id}/image`, form);
+  }
+  removeImage(owner: ImageOwner, id: string) { return this.http.delete<void>(`${this.base}/${owner}/${id}/image`); }
+  uploadMyImage(file: File) {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return this.http.put<{ id: string; url: string }>(`${this.base}/auth/me/image`, form);
+  }
+  removeMyImage() { return this.http.delete<void>(`${this.base}/auth/me/image`); }
+  countries() { return this.http.get<string[]>(`${this.base}/customers/countries`); }
   dashboard() { return this.http.get<Dashboard>(`${this.base}/reports/dashboard`); }
   expiring(days: number) { return this.http.get<ExpiringLicense[]>(`${this.base}/reports/expiring-licenses`, { params: params({ days }) }); }
   activeDevices() { return this.http.get<ActiveDevice[]>(`${this.base}/reports/active-devices`); }

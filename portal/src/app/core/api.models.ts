@@ -9,7 +9,7 @@ export interface ProblemDetails {
 
 export interface UserProfile {
   id: string; email: string; fullName: string; role: Role; tenantId?: string; tenantName?: string;
-  customerId?: string; customerName?: string; permissions: string[]; language: 'ar' | 'en';
+  customerId?: string; customerName?: string; permissions: string[]; language: 'ar' | 'en'; imageUrl?: string;
 }
 export interface AuthResponse { accessToken: string; expiresAt: string; refreshToken: string; user: UserProfile; }
 
@@ -29,20 +29,20 @@ export const Perm = {
 export type TenantStatus = 'Active' | 'Suspended';
 export interface Tenant {
   id: string; name: string; code: string; contactEmail?: string; status: TenantStatus; createdAt: string;
-  suspensionReason?: string; customers: number; users: number; activeLicenses: number; products: number; licenses: number;
+  suspensionReason?: string; customers: number; users: number; activeLicenses: number; products: number; licenses: number; imageUrl?: string;
 }
 
 export type CustomerStatus = 'Active' | 'Inactive';
 export interface Customer {
   id: string; tenantId: string; tenantName?: string; name: string; email?: string; phone?: string; country?: string;
-  taxNumber?: string; status: CustomerStatus; createdAt: string; activeSubscriptions: number; activeLicenses: number;
+  taxNumber?: string; status: CustomerStatus; createdAt: string; activeSubscriptions: number; activeLicenses: number; imageUrl?: string;
 }
 export interface Contact { id: string; name: string; email?: string; phone?: string; jobTitle?: string; isPrimary: boolean; }
 export interface CustomerDetails { customer: Customer; contacts: Contact[]; }
 
 export interface Product {
   id: string; tenantId: string; code: string; name: string; description?: string; isActive: boolean; createdAt: string; publishedPlans: number;
-  plans: number; licenses: number; platforms: string[];
+  plans: number; licenses: number; platforms: string[]; icon?: string | null; imageUrl?: string;
 }
 
 export type PlanStatus = 'Draft' | 'Published' | 'Archived';
@@ -91,7 +91,7 @@ export const ApiScopes = ['licenses.activate', 'licenses.validate', 'licenses.is
 
 export interface User {
   id: string; email: string; fullName: string; role: Role; tenantId?: string; tenantName?: string; customerId?: string;
-  customerName?: string; isActive: boolean; lastLoginAt?: string; createdAt: string;
+  customerName?: string; isActive: boolean; lastLoginAt?: string; createdAt: string; imageUrl?: string;
 }
 
 export interface AuditRecord {
@@ -137,3 +137,7 @@ export interface ActivationRow {
   activatedAt: string; lastHeartbeatAt?: string; online: boolean;
 }
 export const Platforms = ['Windows', 'Linux', 'macOS', 'Android', 'iOS', 'Web'];
+
+export type ImageOwner = 'tenants' | 'customers' | 'products' | 'users';
+/** Built-in product icons offered when no image is uploaded. */
+export const ProductIcons = ['cube', 'server', 'shield', 'monitor', 'code', 'chart', 'key', 'layers', 'activity', 'card', 'users', 'building'];

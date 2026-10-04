@@ -8,21 +8,31 @@ import { I18n, LocalNumberPipe, TranslatePipe } from '../core/i18n.service';
 import { Toasts } from '../core/toast.service';
 import { Icon } from '../shared/icon';
 import { Modal, StateView, StatusBadge, loader } from '../shared/ui';
+import { Avatar } from '../shared/media';
 
 /** Plans of one product as pricing cards (mockup "Monitor Agent - Plans"), the middle published plan highlighted. */
 @Component({
   selector: 'app-plans',
-  imports: [FormsModule, RouterLink, TranslatePipe, LocalNumberPipe, StateView, StatusBadge, Modal, Icon],
+  imports: [FormsModule, RouterLink, TranslatePipe, LocalNumberPipe, StateView, StatusBadge, Modal, Icon, Avatar],
   template: `
     <nav class="crumbs"><a routerLink="/products">{{ 'nav.products' | t }}</a><span>/</span><span>{{ product()?.name }}</span><span>/</span><span>{{ 'nav.plans' | t }}</span></nav>
     <header class="page-head">
-      <div>
+      <div class="entity-head">
+        @if (product(); as p) { <app-avatar [src]="p.imageUrl" [name]="p.name" [icon]="p.icon || 'cube'" [size]="48" /> }
+        <div>
         <h1>{{ product() ? ('plans.forProduct' | t: { name: product()!.name }) : ('plans.title' | t) }}</h1>
         <p class="subtitle">{{ 'plans.sub' | t }}</p>
+        </div>
       </div>
       <div class="actions">
         <select [ngModel]="productId()" (ngModelChange)="productId.set($event)" [attr.aria-label]="'col.product' | t">
           @for (p of products.data()?.items; track p.id) { <option [value]="p.id">{{ p.name }}</option> }
+        </select>
+        <select [ngModel]="status()" (ngModelChange)="status.set($event)" [attr.aria-label]="'col.status' | t">
+          <option value="">{{ 'filter.allStatus' | t }}</option>
+          <option value="Draft">{{ 'status.Draft' | t }}</option>
+          <option value="Published">{{ 'status.Published' | t }}</option>
+          <option value="Archived">{{ 'status.Archived' | t }}</option>
         </select>
         @if (canManage() && product()) {
           <button class="btn btn-primary" type="button" (click)="newPlan()"><app-icon name="plus" [size]="16" />{{ 'plans.new' | t }}</button>
@@ -93,9 +103,10 @@ export class PlansPage {
   readonly canManage = computed(() => this.auth.can(this.auth.perm.CatalogManage));
 
   readonly products = loader(() => this.api.products({ pageSize: 200 }));
+  readonly status = signal('');
   readonly productId = signal<string>(this.route.snapshot.queryParamMap.get('product') ?? '');
   readonly product = computed(() => (this.products.data()?.items ?? []).find(p => p.id === this.productId()) ?? null);
-  readonly plans = loader(() => this.api.plans({ productId: this.productId(), pageSize: 200 }), false);
+  readonly plans = loader(() => this.api.plans({ productId: this.productId(), status: this.status(), pageSize: 200 }), false);
 
   /** Cheapest first, archived last, like a public pricing page. */
   readonly ordered = computed(() => [...(this.plans.data()?.items ?? [])]
@@ -116,7 +127,7 @@ export class PlansPage {
       const items = this.products.data()?.items ?? [];
       if (items.length && !items.some(p => p.id === this.productId())) this.productId.set(items[0].id);
     });
-    effect(() => { if (this.productId()) this.plans.load(); });
+    effect(() => { this.status(); if (this.productId()) this.plans.load(); });
   }
 
   cycle(pl: Plan): string {

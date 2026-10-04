@@ -8,11 +8,12 @@ import { I18n, LocalDatePipe, LocalNumberPipe, TranslatePipe } from '../core/i18
 import { Toasts } from '../core/toast.service';
 import { Icon } from '../shared/icon';
 import { Modal, Pager, StateView, StatusBadge, loader } from '../shared/ui';
+import { Avatar, ImageUpload, Lookups } from '../shared/media';
 
 /** Tenants list from the mockup: search + filters bar, table with row actions menu, numbered pagination. */
 @Component({
   selector: 'app-tenants',
-  imports: [FormsModule, RouterLink, TranslatePipe, LocalNumberPipe, LocalDatePipe, StateView, StatusBadge, Pager, Modal, Icon],
+  imports: [FormsModule, RouterLink, TranslatePipe, LocalNumberPipe, LocalDatePipe, StateView, StatusBadge, Pager, Modal, Icon, Avatar, ImageUpload],
   template: `
     <header class="page-head">
       <div><h1>{{ 'tenants.title' | t }}</h1><p class="subtitle">{{ 'tenants.sub' | t }}</p></div>
@@ -32,6 +33,11 @@ import { Modal, Pager, StateView, StatusBadge, loader } from '../shared/ui';
           <option value="Active">{{ 'status.Active' | t }}</option>
           <option value="Suspended">{{ 'status.Suspended' | t }}</option>
         </select>
+        <label class="date-pair"><span>{{ 'filter.createdFrom' | t }}</span><input type="date" [ngModel]="from()" (ngModelChange)="from.set($event); page.set(1)" />
+          <span>{{ 'filter.to' | t }}</span><input type="date" [ngModel]="to()" (ngModelChange)="to.set($event); page.set(1)" /></label>
+        @if (status() || from() || to() || search()) {
+          <button class="btn btn-sm btn-ghost" type="button" (click)="clear()">{{ 'filter.clear' | t }}</button>
+        }
         <span class="spacer"></span>
         <button class="icon-btn" type="button" [attr.aria-label]="'common.refresh' | t" [title]="'common.refresh' | t" (click)="list.load()"><app-icon name="refresh" [size]="18" /></button>
       </div>
@@ -46,7 +52,7 @@ import { Modal, Pager, StateView, StatusBadge, loader } from '../shared/ui';
             <tbody>
               @for (t of list.data()?.items; track t.id) {
                 <tr class="clickable" (click)="router.navigate(['/tenants', t.id])">
-                  <td><strong>{{ t.name }}</strong></td>
+                  <td><div class="name-cell"><app-avatar [src]="t.imageUrl" [name]="t.name" [size]="32" /><strong>{{ t.name }}</strong></div></td>
                   <td class="mono" dir="ltr">{{ t.code }}</td>
                   <td>{{ t.users | num }}</td>
                   <td>{{ t.products | num }}</td>
@@ -83,6 +89,11 @@ import { Modal, Pager, StateView, StatusBadge, loader } from '../shared/ui';
 
     <app-modal [(open)]="formOpen" [title]="(editing() ? 'common.edit' : 'tenants.new') | t">
       <form class="form" (ngSubmit)="save()">
+        @if (editing(); as e) {
+          <div class="field"><span>{{ 'img.title' | t }}</span><app-image-upload owner="tenants" [ownerId]="e.id" [url]="e.imageUrl" [name]="e.name" (changed)="list.load(); lookups.invalidate()" /></div>
+        } @else {
+          <p class="hint">{{ 'img.afterSave' | t }}</p>
+        }
         <label class="field"><span>{{ 'common.name' | t }}</span><input name="name" required [(ngModel)]="form.name" /></label>
         <label class="field"><span>{{ 'common.code' | t }}</span><input name="code" dir="ltr" required [disabled]="!!editing()" [(ngModel)]="form.code" /></label>
         <label class="field"><span>{{ 'tenants.contactEmail' | t }}</span><input name="email" type="email" dir="ltr" [(ngModel)]="form.contactEmail" /></label>
@@ -112,12 +123,15 @@ export class TenantsPage {
   private route = inject(ActivatedRoute);
   readonly router = inject(Router);
   readonly auth = inject(AuthService);
+  readonly lookups = inject(Lookups);
 
   readonly search = signal(this.route.snapshot.queryParamMap.get('search') ?? '');
-  readonly status = signal('');
+  readonly status = signal(this.route.snapshot.queryParamMap.get('status') ?? '');
+  readonly from = signal('');
+  readonly to = signal('');
   readonly page = signal(1);
   readonly pageSize = signal(10);
-  readonly list = loader(() => this.api.tenants({ search: this.search(), status: this.status(), page: this.page(), pageSize: this.pageSize() }), false);
+  readonly list = loader(() => this.api.tenants({ search: this.search(), status: this.status(), from: this.from(), to: this.to(), page: this.page(), pageSize: this.pageSize() }), false);
   readonly menuFor = signal<string | null>(null);
 
   readonly formOpen = signal(false);
@@ -129,9 +143,11 @@ export class TenantsPage {
   reason = '';
 
   constructor() {
-    effect(() => { this.search(); this.status(); this.page(); this.pageSize(); this.list.load(); });
+    effect(() => { this.search(); this.status(); this.from(); this.to(); this.page(); this.pageSize(); this.list.load(); });
     if (this.route.snapshot.queryParamMap.get('new')) queueMicrotask(() => this.openNew());
   }
+
+  clear() { this.search.set(''); this.status.set(''); this.from.set(''); this.to.set(''); this.page.set(1); }
 
   @HostListener('document:click') closeMenus() { this.menuFor.set(null); }
   toggleMenu(id: string, e: Event) { e.stopPropagation(); this.menuFor.set(this.menuFor() === id ? null : id); }
@@ -144,7 +160,7 @@ export class TenantsPage {
     const req = e
       ? this.api.updateTenant(e.id, { name: this.form.name, contactEmail: this.form.contactEmail || undefined })
       : this.api.createTenant({ name: this.form.name, code: this.form.code, contactEmail: this.form.contactEmail || undefined });
-    req.subscribe(() => { this.toasts.success(this.i18n.t('common.saved')); this.formOpen.set(false); this.list.load(); });
+    req.subscribe(() => { this.toasts.success(this.i18n.t('common.saved')); this.formOpen.set(false); this.list.load(); this.lookups.invalidate(); });
   }
 
   suspend() {

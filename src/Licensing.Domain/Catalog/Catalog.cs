@@ -16,6 +16,21 @@ public sealed class Product : AggregateRoot, ITenantOwned
     /// <summary>Supported platforms, stored as a ';' separated list.</summary>
     public string PlatformsValue { get; private set; } = "";
 
+    /// <summary>Uploaded logo/photo (see MediaFile), or null.</summary>
+    public Guid? ImageId { get; private set; }
+
+    public void SetImage(Guid? imageId) => ImageId = imageId;
+
+    /// <summary>Built-in icon name used when no image is uploaded (e.g. "cube", "server", "shield").</summary>
+    public string? Icon { get; private set; }
+
+    public void SetIcon(string? icon)
+    {
+        if (icon is not null && (icon.Length > 32 || !icon.All(char.IsAsciiLetterOrDigit)))
+            throw new DomainException(Error.Validation("VALIDATION_FAILED", "Icon must be a short icon name."));
+        Icon = string.IsNullOrWhiteSpace(icon) ? null : icon;
+    }
+
     public static readonly string[] KnownPlatforms = ["Windows", "Linux", "macOS", "Android", "iOS", "Web"];
 
     public IReadOnlyList<string> Platforms =>

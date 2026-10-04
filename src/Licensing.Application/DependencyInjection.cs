@@ -30,6 +30,7 @@ public static class DependencyInjection
         services.AddScoped<ApiClientService>();
         services.AddScoped<AuditQueryService>();
         services.AddScoped<ReportService>();
+        services.AddScoped<Media.MediaService>();
 
         services.AddScoped<IIntegrationEventHandler<SubscriptionExpiredV1>, ExpireLicensesOnSubscriptionExpired>();
         services.AddScoped<IIntegrationEventHandler<SubscriptionCancelledV1>, ExpireLicensesOnSubscriptionExpired>();

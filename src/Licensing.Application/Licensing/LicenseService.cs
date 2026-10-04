@@ -27,12 +27,18 @@ public sealed record ActivationRowDto(
 public sealed record LicenseDetailsDto(LicenseDto License, IReadOnlyList<ActivationDto> Activations);
 
 public sealed record IssueLicenseRequest(Guid SubscriptionId);
+
+public sealed record LicenseFilter(Guid? CustomerId = null, Guid? SubscriptionId = null, LicenseStatus? Status = null, Guid? ProductId = null,
+    Guid? PlanId = null, Guid? TenantId = null, bool? NearExpiry = null, bool? LimitReached = null);
+
+/// <summary>State is "online", "offline" or "disabled".</summary>
+public sealed record ActivationFilter(string? State = null, Guid? LicenseId = null, Guid? ProductId = null, string? Os = null, Guid? TenantId = null);
 /// <summary>The only response that ever carries the full product key.</summary>
 public sealed record IssuedLicenseDto(LicenseDto License, string ProductKey);
 public sealed record LicenseActionRequest(string? Reason);
 
 public sealed class LicenseService(
-    IAppDbContext db, IProductKeyGenerator keys, ILicenseCache cache, IAuditLogger audit, TimeProvider clock)
+    IAppDbContext db, IProductKeyGenerator keys, ILicenseCache cache, IAuditLogger audit, ITenantContext scope, TimeProvider clock)
 {
     private sealed class Row { public required License L { get; init; } public required string CustomerName { get; init; } }
 
@@ -44,12 +50,22 @@ public sealed class LicenseService(
         r.L.LicenseNumber, r.L.ProductKeyPrefix, r.L.Status, r.L.StatusReason, r.L.IssuedAt, r.L.ExpiresAt,
         r.L.MaxActivations, r.L.ActiveActivations, r.L.Features, r.L.HeartbeatIntervalHours, r.L.OfflineGraceDays);
 
-    public async Task<PagedResult<LicenseDto>> ListAsync(PageQuery page, Guid? customerId, Guid? subscriptionId, LicenseStatus? status, CancellationToken ct)
+    public async Task<PagedResult<LicenseDto>> ListAsync(PageQuery page, LicenseFilter f, CancellationToken ct)
     {
+        var now = clock.GetUtcNow();
         var q = db.Licenses.AsQueryable();
-        if (customerId is not null) q = q.Where(l => l.CustomerId == customerId);
-        if (subscriptionId is not null) q = q.Where(l => l.SubscriptionId == subscriptionId);
-        if (status is not null) q = q.Where(l => l.Status == status);
+        if (f.CustomerId is not null) q = q.Where(l => l.CustomerId == f.CustomerId);
+        if (f.SubscriptionId is not null) q = q.Where(l => l.SubscriptionId == f.SubscriptionId);
+        if (f.Status is not null) q = q.Where(l => l.Status == f.Status);
+        if (f.ProductId is not null) q = q.Where(l => l.ProductId == f.ProductId);
+        if (f.PlanId is not null) q = q.Where(l => l.PlanId == f.PlanId);
+        if (f.TenantId is { } tid && scope.IsUnrestricted) q = q.Where(l => l.TenantId == tid);
+        if (f.NearExpiry == true)
+        {
+            var soon = now.AddDays(30);
+            q = q.Where(l => l.Status == LicenseStatus.Active && l.ExpiresAt != null && l.ExpiresAt > now && l.ExpiresAt <= soon);
+        }
+        if (f.LimitReached == true) q = q.Where(l => l.MaxActivations != null && l.ActiveActivations >= l.MaxActivations);
         var rows = Rows(q);
         if (!string.IsNullOrWhiteSpace(page.Search))
         {
@@ -77,15 +93,39 @@ public sealed class LicenseService(
     }
 
     /// <summary>All devices the caller can see, newest first. "Online" = checked in within two heartbeat intervals.</summary>
-    public async Task<PagedResult<ActivationRowDto>> ListActivationsAsync(PageQuery page, ActivationStatus? status, Guid? licenseId, CancellationToken ct)
+    public async Task<PagedResult<ActivationRowDto>> ListActivationsAsync(PageQuery page, ActivationFilter f, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
         var q = from a in db.LicenseActivations
                 join l in db.Licenses on a.LicenseId equals l.Id
                 join c in db.Customers on a.CustomerId equals c.Id
-                select new { a, l.LicenseNumber, l.ProductCode, l.HeartbeatIntervalHours, CustomerName = c.Name };
-        if (status is not null) q = q.Where(x => x.a.Status == status);
-        if (licenseId is not null) q = q.Where(x => x.a.LicenseId == licenseId);
+                select new { a, l.LicenseNumber, l.ProductCode, l.ProductId, l.TenantId, l.HeartbeatIntervalHours, CustomerName = c.Name };
+        if (f.LicenseId is not null) q = q.Where(x => x.a.LicenseId == f.LicenseId);
+        if (f.ProductId is not null) q = q.Where(x => x.ProductId == f.ProductId);
+        if (f.TenantId is { } tid && scope.IsUnrestricted) q = q.Where(x => x.TenantId == tid);
+        if (!string.IsNullOrWhiteSpace(f.Os)) q = q.Where(x => x.a.OperatingSystem != null && x.a.OperatingSystem.Contains(f.Os));
+        // Online = active and checked in within two heartbeat intervals. The interval is per license, so the cut-off is
+        // computed per distinct interval (few values) and the parts are combined, which every provider can translate.
+        if (f.State == "disabled")
+        {
+            q = q.Where(x => x.a.Status == ActivationStatus.Deactivated);
+        }
+        else if (f.State is "online" or "offline")
+        {
+            var online = f.State == "online";
+            var active = q.Where(x => x.a.Status == ActivationStatus.Active);
+            var intervals = await active.Select(x => x.HeartbeatIntervalHours).Distinct().ToListAsync(ct);
+            var combined = active.Where(_ => false);
+            foreach (var hours in intervals)
+            {
+                var cutoff = now.AddHours(-2 * hours);
+                var part = online
+                    ? active.Where(x => x.HeartbeatIntervalHours == hours && x.a.LastHeartbeatAt != null && x.a.LastHeartbeatAt >= cutoff)
+                    : active.Where(x => x.HeartbeatIntervalHours == hours && (x.a.LastHeartbeatAt == null || x.a.LastHeartbeatAt < cutoff));
+                combined = combined.Concat(part);
+            }
+            q = combined;
+        }
         if (!string.IsNullOrWhiteSpace(page.Search))
         {
             var s = page.Search.Trim();

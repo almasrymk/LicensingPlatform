@@ -18,8 +18,8 @@ public sealed class TenantsController(TenantService tenants) : ControllerBase
 {
     [HttpGet]
     [HasPermission(Permissions.TenantsRead)]
-    public Task<PagedResult<TenantDto>> List([FromQuery] PageQuery page, [FromQuery] TenantStatus? status, CancellationToken ct) =>
-        tenants.ListAsync(page, status, ct);
+    public Task<PagedResult<TenantDto>> List([FromQuery] PageQuery page, [FromQuery] TenantFilter filter, CancellationToken ct) =>
+        tenants.ListAsync(page, filter, ct);
 
     [HttpGet("{id:guid}")]
     [HasPermission(Permissions.TenantsRead)]
@@ -52,8 +52,12 @@ public sealed class CustomersController(CustomerService customers) : ControllerB
 {
     [HttpGet]
     [HasPermission(Permissions.CustomersRead)]
-    public Task<PagedResult<CustomerDto>> List([FromQuery] PageQuery page, [FromQuery] CustomerStatus? status, CancellationToken ct) =>
-        customers.ListAsync(page, status, ct);
+    public Task<PagedResult<CustomerDto>> List([FromQuery] PageQuery page, [FromQuery] CustomerFilter filter, CancellationToken ct) =>
+        customers.ListAsync(page, filter, ct);
+
+    [HttpGet("countries")]
+    [HasPermission(Permissions.CustomersRead)]
+    public Task<IReadOnlyList<string>> Countries(CancellationToken ct) => customers.CountriesAsync(ct);
 
     [HttpGet("{id:guid}")]
     [HasPermission(Permissions.CustomersRead)]
@@ -92,8 +96,8 @@ public sealed class UsersController(UserService users) : ControllerBase
 {
     [HttpGet]
     [HasPermission(Permissions.UsersManage)]
-    public Task<PagedResult<UserDto>> List([FromQuery] PageQuery page, [FromQuery] string? role, CancellationToken ct) =>
-        users.ListAsync(page, role, ct);
+    public Task<PagedResult<UserDto>> List([FromQuery] PageQuery page, [FromQuery] UserFilter filter, CancellationToken ct) =>
+        users.ListAsync(page, filter, ct);
 
     [HttpGet("{id:guid}")]
     [HasPermission(Permissions.UsersManage)]

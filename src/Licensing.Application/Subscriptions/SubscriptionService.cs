@@ -17,12 +17,15 @@ public sealed record SubscriptionDto(
 public sealed record SubscriptionHistoryDto(SubscriptionAction Action, SubscriptionStatus? FromStatus, SubscriptionStatus ToStatus, DateTimeOffset At, string? Details);
 public sealed record SubscriptionDetailsDto(SubscriptionDto Subscription, IReadOnlyList<SubscriptionHistoryDto> History);
 
+public sealed record SubscriptionFilter(Guid? CustomerId = null, SubscriptionStatus? Status = null, Guid? ProductId = null, Guid? PlanId = null,
+    Guid? TenantId = null, DateTimeOffset? EndFrom = null, DateTimeOffset? EndTo = null);
+
 public sealed record StartSubscriptionRequest(Guid CustomerId, Guid PlanId, DateTimeOffset? StartDate, string? Notes);
 public sealed record RenewSubscriptionRequest(int? DurationDays, int? ExpectedVersion);
 public sealed record ChangePlanRequest(Guid PlanId, int? ExpectedVersion);
 public sealed record SubscriptionActionRequest(string? Reason, int? ExpectedVersion);
 
-public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, ILicenseCache cache, TimeProvider clock)
+public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, ILicenseCache cache, ITenantContext scope, TimeProvider clock)
 {
     private sealed class Row
     {
@@ -46,11 +49,16 @@ public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, IL
         r.S.Status, r.S.StartDate, r.S.EndDate, r.S.TrialEndsAt, r.S.IsLifetime, r.S.Version,
         Subscription.AllowedActions(r.S.Status), r.Licenses, r.S.CreatedAt);
 
-    public async Task<PagedResult<SubscriptionDto>> ListAsync(PageQuery page, Guid? customerId, SubscriptionStatus? status, CancellationToken ct)
+    public async Task<PagedResult<SubscriptionDto>> ListAsync(PageQuery page, SubscriptionFilter f, CancellationToken ct)
     {
         var q = db.Subscriptions.AsQueryable();
-        if (customerId is not null) q = q.Where(s => s.CustomerId == customerId);
-        if (status is not null) q = q.Where(s => s.Status == status);
+        if (f.CustomerId is not null) q = q.Where(s => s.CustomerId == f.CustomerId);
+        if (f.Status is not null) q = q.Where(s => s.Status == f.Status);
+        if (f.ProductId is not null) q = q.Where(s => s.ProductId == f.ProductId);
+        if (f.PlanId is not null) q = q.Where(s => s.PlanId == f.PlanId);
+        if (f.TenantId is { } tid && scope.IsUnrestricted) q = q.Where(s => s.TenantId == tid);
+        if (f.EndFrom is not null) q = q.Where(s => s.EndDate != null && s.EndDate >= f.EndFrom);
+        if (f.EndTo is not null) q = q.Where(s => s.EndDate != null && s.EndDate <= f.EndTo);
         var rows = Rows(q);
         if (!string.IsNullOrWhiteSpace(page.Search))
             rows = rows.Where(r => r.CustomerName.Contains(page.Search) || r.PlanName.Contains(page.Search) || r.ProductName.Contains(page.Search));

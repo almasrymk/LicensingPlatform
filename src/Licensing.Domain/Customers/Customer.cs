@@ -21,6 +21,11 @@ public sealed class Customer : AggregateRoot, ITenantOwned
     public DateTimeOffset CreatedAt { get; private set; }
     public IReadOnlyCollection<CustomerContact> Contacts => _contacts.AsReadOnly();
 
+    /// <summary>Uploaded logo/photo (see MediaFile), or null.</summary>
+    public Guid? ImageId { get; private set; }
+
+    public void SetImage(Guid? imageId) => ImageId = imageId;
+
     public static Customer Create(Guid tenantId, string name, string? email, string? phone, string? country, string? taxNumber, DateTimeOffset now) => new()
     {
         TenantId = tenantId,

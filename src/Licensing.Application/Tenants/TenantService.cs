@@ -9,7 +9,12 @@ namespace Licensing.Application.Tenants;
 
 public sealed record TenantDto(
     Guid Id, string Name, string Code, string? ContactEmail, TenantStatus Status, DateTimeOffset CreatedAt,
-    string? SuspensionReason, int Customers, int Users, int ActiveLicenses, int Products, int Licenses);
+    string? SuspensionReason, int Customers, int Users, int ActiveLicenses, int Products, int Licenses, Guid? ImageId)
+{
+    public string ImageUrl => Media.MediaService.UrlFor(ImageId);
+}
+
+public sealed record TenantFilter(TenantStatus? Status = null, DateTimeOffset? From = null, DateTimeOffset? To = null);
 
 public sealed record CreateTenantRequest(string Name, string Code, string? ContactEmail);
 public sealed record UpdateTenantRequest(string Name, string? ContactEmail);
@@ -28,14 +33,17 @@ public sealed class TenantService(IAppDbContext db, ITenantContext scope, IAudit
         db.Users.Count(u => u.TenantId == t.Id),
         db.Licenses.IgnoreQueryFilters().Count(l => l.TenantId == t.Id && l.Status == LicenseStatus.Active),
         db.Products.IgnoreQueryFilters().Count(p => p.TenantId == t.Id),
-        db.Licenses.IgnoreQueryFilters().Count(l => l.TenantId == t.Id)));
+        db.Licenses.IgnoreQueryFilters().Count(l => l.TenantId == t.Id),
+        t.ImageId));
 
-    public Task<PagedResult<TenantDto>> ListAsync(PageQuery page, TenantStatus? status, CancellationToken ct)
+    public Task<PagedResult<TenantDto>> ListAsync(PageQuery page, TenantFilter filter, CancellationToken ct)
     {
         var q = Scoped();
         if (!string.IsNullOrWhiteSpace(page.Search))
-            q = q.Where(t => t.Name.Contains(page.Search) || t.Code.Contains(page.Search));
-        if (status is not null) q = q.Where(t => t.Status == status);
+            q = q.Where(t => t.Name.Contains(page.Search) || t.Code.Contains(page.Search) || (t.ContactEmail != null && t.ContactEmail.Contains(page.Search)));
+        if (filter.Status is not null) q = q.Where(t => t.Status == filter.Status);
+        if (filter.From is not null) q = q.Where(t => t.CreatedAt >= filter.From);
+        if (filter.To is not null) q = q.Where(t => t.CreatedAt <= filter.To);
         return Project(q.OrderBy(t => t.Name)).ToPagedAsync(page, ct);
     }
 

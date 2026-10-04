@@ -89,8 +89,8 @@ public sealed class SubscriptionsController(SubscriptionService subscriptions) :
 {
     [HttpGet]
     [HasPermission(Permissions.SubscriptionsRead)]
-    public Task<PagedResult<SubscriptionDto>> List([FromQuery] PageQuery page, [FromQuery] Guid? customerId, [FromQuery] SubscriptionStatus? status, CancellationToken ct) =>
-        subscriptions.ListAsync(page, customerId, status, ct);
+    public Task<PagedResult<SubscriptionDto>> List([FromQuery] PageQuery page, [FromQuery] SubscriptionFilter filter, CancellationToken ct) =>
+        subscriptions.ListAsync(page, filter, ct);
 
     [HttpGet("{id:guid}")]
     [HasPermission(Permissions.SubscriptionsRead)]
@@ -134,8 +134,8 @@ public sealed class LicensesController(LicenseService licenses) : ControllerBase
 {
     [HttpGet]
     [HasPermission(Permissions.LicensesRead)]
-    public Task<PagedResult<LicenseDto>> List([FromQuery] PageQuery page, [FromQuery] Guid? customerId, [FromQuery] Guid? subscriptionId,
-        [FromQuery] LicenseStatus? status, CancellationToken ct) => licenses.ListAsync(page, customerId, subscriptionId, status, ct);
+    public Task<PagedResult<LicenseDto>> List([FromQuery] PageQuery page, [FromQuery] LicenseFilter filter, CancellationToken ct) =>
+        licenses.ListAsync(page, filter, ct);
 
     [HttpGet("{id:guid}")]
     [HasPermission(Permissions.LicensesRead)]
@@ -169,8 +169,8 @@ public sealed class LicensesController(LicenseService licenses) : ControllerBase
     /// <summary>All activated devices (Activations / Devices screen).</summary>
     [HttpGet("/api/v1/activations")]
     [HasPermission(Permissions.LicensesRead)]
-    public Task<PagedResult<ActivationRowDto>> Activations([FromQuery] PageQuery page, [FromQuery] ActivationStatus? status,
-        [FromQuery] Guid? licenseId, CancellationToken ct) => licenses.ListActivationsAsync(page, status, licenseId, ct);
+    public Task<PagedResult<ActivationRowDto>> Activations([FromQuery] PageQuery page, [FromQuery] ActivationFilter filter, CancellationToken ct) =>
+        licenses.ListActivationsAsync(page, filter, ct);
 
     [HttpPost("{id:guid}/activations/{activationId:guid}/reset")]
     [HasPermission(Permissions.LicensesManage)]

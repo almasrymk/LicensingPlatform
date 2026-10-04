@@ -7,19 +7,25 @@ import { AuthService } from '../core/auth.service';
 import { I18n, LocalDatePipe, LocalNumberPipe, TranslatePipe } from '../core/i18n.service';
 import { Toasts } from '../core/toast.service';
 import { Modal, StateView, StatusBadge, loader } from '../shared/ui';
+import { Avatar, ImageUpload } from '../shared/media';
 
 /** Customer 360: profile, contacts, subscriptions, licenses and (for staff) the customer's portal users. */
 @Component({
   selector: 'app-customer-details',
-  imports: [FormsModule, RouterLink, TranslatePipe, LocalDatePipe, LocalNumberPipe, StateView, StatusBadge, Modal],
+  imports: [FormsModule, RouterLink, TranslatePipe, LocalDatePipe, LocalNumberPipe, StateView, StatusBadge, Modal, Avatar, ImageUpload],
   template: `
     <app-state [loading]="data.loading() && !data.data()" [error]="data.error()" (retry)="data.load()">
       @if (data.data(); as d) {
         <header class="page-head">
           <div>
             <a class="back" routerLink="/customers">← {{ 'common.back' | t }}</a>
-            <h1>{{ d.c.customer.name }} <app-status [value]="d.c.customer.status" /></h1>
-            <p class="muted">{{ d.c.customer.tenantName }}</p>
+            <div class="entity-head">
+              <app-avatar [src]="logo() ?? d.c.customer.imageUrl" [name]="d.c.customer.name" [size]="56" [round]="true" tone="green" />
+              <div>
+                <h1>{{ d.c.customer.name }} <app-status [value]="d.c.customer.status" /></h1>
+                <p class="muted">{{ d.c.customer.tenantName }}</p>
+              </div>
+            </div>
           </div>
           @if (auth.can(auth.perm.CustomersManage)) {
             <div class="actions">
@@ -114,7 +120,7 @@ import { Modal, StateView, StatusBadge, loader } from '../shared/ui';
             @if (users.data(); as u) {
               <ul class="plain">
                 @for (x of u.items; track x.id) {
-                  @if (x.customerId === id()) { <li><span dir="ltr">{{ x.email }}</span> — {{ x.fullName }} <app-status [value]="x.isActive ? 'Active' : 'Disabled'" /></li> }
+                  @if (x.customerId === id()) { <li class="name-cell"><app-avatar [src]="x.imageUrl" [name]="x.fullName" [size]="28" [round]="true" /><span dir="ltr">{{ x.email }}</span> — {{ x.fullName }} <app-status [value]="x.isActive ? 'Active' : 'Disabled'" /></li> }
                 }
               </ul>
             }
@@ -125,6 +131,9 @@ import { Modal, StateView, StatusBadge, loader } from '../shared/ui';
 
     <app-modal [(open)]="editOpen" [title]="'common.edit' | t">
       <form class="form" (ngSubmit)="saveEdit()">
+        @if (data.data(); as d) {
+          <div class="field"><span>{{ 'img.title' | t }}</span><app-image-upload owner="customers" [ownerId]="d.c.customer.id" [url]="logo() ?? d.c.customer.imageUrl" [name]="d.c.customer.name" [round]="true" (changed)="logo.set($event)" /></div>
+        }
         <label class="field"><span>{{ 'common.name' | t }}</span><input name="name" required [(ngModel)]="form.name" /></label>
         <div class="grid-2">
           <label class="field"><span>{{ 'common.email' | t }}</span><input name="email" type="email" dir="ltr" [(ngModel)]="form.email" /></label>
@@ -175,6 +184,7 @@ export class CustomerDetailsPage implements OnInit {
   readonly users = loader(() => this.api.users({ role: 'CustomerUser', pageSize: 200 }), this.auth.can(this.auth.perm.UsersManage));
 
   readonly editOpen = signal(false);
+  readonly logo = signal<string | null>(null);
   readonly contactOpen = signal(false);
   readonly userOpen = signal(false);
   form = { name: '', email: '', phone: '', country: '', taxNumber: '' };

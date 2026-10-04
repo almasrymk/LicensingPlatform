@@ -3,16 +3,17 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { Api } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
-import { Platforms, Product } from '../core/api.models';
+import { Platforms, Product, ProductIcons } from '../core/api.models';
 import { I18n, LocalNumberPipe, TranslatePipe } from '../core/i18n.service';
 import { Toasts } from '../core/toast.service';
 import { Icon } from '../shared/icon';
 import { Modal, StateView, loader } from '../shared/ui';
+import { Avatar, ImageUpload, Lookups } from '../shared/media';
 
 /** Products from the mockup: cards with icon tile, platform chips, plans/licenses counts, status and a row menu. */
 @Component({
   selector: 'app-catalog',
-  imports: [FormsModule, TranslatePipe, LocalNumberPipe, StateView, Modal, Icon],
+  imports: [FormsModule, TranslatePipe, LocalNumberPipe, StateView, Modal, Icon, Avatar, ImageUpload],
   template: `
     <header class="page-head">
       <div><h1>{{ 'products.title' | t }}</h1><p class="subtitle">{{ 'products.sub' | t }}</p></div>
@@ -31,6 +32,13 @@ import { Modal, StateView, loader } from '../shared/ui';
         <option value="active">{{ 'status.Active' | t }}</option>
         <option value="inactive">{{ 'status.Inactive' | t }}</option>
       </select>
+      <select [ngModel]="platform()" (ngModelChange)="platform.set($event)" [attr.aria-label]="'products.platforms' | t">
+        <option value="">{{ 'filter.allPlatforms' | t }}</option>
+        @for (pl of allPlatforms; track pl) { <option [value]="pl">{{ pl }}</option> }
+      </select>
+      @if (search() || status() || platform()) {
+        <button class="btn btn-sm btn-ghost" type="button" (click)="search.set(''); status.set(''); platform.set('')">{{ 'filter.clear' | t }}</button>
+      }
     </div>
 
     <app-state [loading]="products.loading() && !products.data()" [error]="products.error()" [empty]="visible().length === 0" (retry)="products.load()">
@@ -38,7 +46,7 @@ import { Modal, StateView, loader } from '../shared/ui';
         @for (p of visible(); track p.id; let i = $index) {
           <article class="pcard">
             <div class="pcard-head">
-              <span class="tile" [class]="'tile ' + tone(i)"><app-icon name="cube" [size]="22" /></span>
+              <app-avatar [src]="p.imageUrl" [name]="p.name" [icon]="p.icon || 'cube'" [size]="44" [tone]="tone(i)" />
               <div><strong>{{ p.name }}</strong><small>{{ p.description }}</small></div>
               <div class="row-menu">
                 <button class="kebab" type="button" [attr.aria-label]="'col.actions' | t" (click)="toggleMenu(p.id, $event)"><app-icon name="moreV" /></button>
@@ -70,6 +78,22 @@ import { Modal, StateView, loader } from '../shared/ui';
         <label class="field"><span>{{ 'common.name' | t }}</span><input name="name" required [(ngModel)]="pForm.name" /></label>
         <label class="field"><span>{{ 'common.description' | t }}</span><textarea name="desc" rows="3" [(ngModel)]="pForm.description"></textarea></label>
         <fieldset class="field">
+          <legend>{{ 'img.icon' | t }}</legend>
+          <div class="icon-grid">
+            @for (ic of icons; track ic) {
+              <button type="button" [class.selected]="(pForm.icon || 'cube') === ic" [attr.aria-label]="ic" [attr.aria-pressed]="(pForm.icon || 'cube') === ic" (click)="pForm.icon = ic"><app-icon [name]="ic" [size]="20" /></button>
+            }
+          </div>
+        </fieldset>
+        <div class="field">
+          <span>{{ 'img.title' | t }}</span>
+          @if (editingProduct(); as e) {
+            <app-image-upload owner="products" [ownerId]="e.id" [url]="e.imageUrl" [name]="e.name" [icon]="pForm.icon || 'cube'" (changed)="products.load(); lookups.invalidate()" />
+          } @else {
+            <p class="hint">{{ 'img.afterSave' | t }}</p>
+          }
+        </div>
+        <fieldset class="field">
           <legend>{{ 'products.platforms' | t }}</legend>
           <div class="platform-chips">
             @for (pl of allPlatforms; track pl) {
@@ -94,18 +118,22 @@ export class CatalogPage {
 
   readonly search = signal('');
   readonly status = signal('');
+  readonly platform = signal('');
+  readonly icons = ProductIcons;
+  readonly lookups = inject(Lookups);
   readonly menuFor = signal<string | null>(null);
   readonly products = loader(() => this.api.products({ pageSize: 200 }));
   readonly visible = computed(() => {
     const q = this.search().trim().toLowerCase();
     return (this.products.data()?.items ?? []).filter(p =>
       (!q || p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q)) &&
-      (!this.status() || (this.status() === 'active') === p.isActive));
+      (!this.status() || (this.status() === 'active') === p.isActive) &&
+      (!this.platform() || p.platforms.includes(this.platform())));
   });
 
   readonly productOpen = signal(false);
   readonly editingProduct = signal<Product | null>(null);
-  pForm = { code: '', name: '', description: '', isActive: true, platforms: [] as string[] };
+  pForm = { code: '', name: '', description: '', isActive: true, platforms: [] as string[], icon: 'cube' as string | null };
 
   @HostListener('document:click') closeMenus() { this.menuFor.set(null); }
   toggleMenu(id: string, e: Event) { e.stopPropagation(); this.menuFor.set(this.menuFor() === id ? null : id); }
@@ -117,22 +145,22 @@ export class CatalogPage {
 
   private ok() { this.toasts.success(this.i18n.t('common.saved')); }
 
-  newProduct() { this.editingProduct.set(null); this.pForm = { code: '', name: '', description: '', isActive: true, platforms: ['Windows'] }; this.productOpen.set(true); }
+  newProduct() { this.editingProduct.set(null); this.pForm = { code: '', name: '', description: '', isActive: true, platforms: ['Windows'], icon: 'cube' }; this.productOpen.set(true); }
 
   editProduct(p: Product) {
     this.editingProduct.set(p);
-    this.pForm = { code: p.code, name: p.name, description: p.description ?? '', isActive: p.isActive, platforms: [...p.platforms] };
+    this.pForm = { code: p.code, name: p.name, description: p.description ?? '', isActive: p.isActive, platforms: [...p.platforms], icon: p.icon ?? 'cube' };
     this.productOpen.set(true);
   }
 
   toggleActive(p: Product) {
-    this.api.updateProduct(p.id, { code: p.code, name: p.name, description: p.description, isActive: !p.isActive, platforms: p.platforms })
+    this.api.updateProduct(p.id, { code: p.code, name: p.name, description: p.description, isActive: !p.isActive, platforms: p.platforms, icon: p.icon })
       .subscribe(() => { this.ok(); this.products.load(); });
   }
 
   saveProduct() {
     const e = this.editingProduct();
     const req = e ? this.api.updateProduct(e.id, this.pForm) : this.api.createProduct(this.pForm);
-    req.subscribe(() => { this.ok(); this.productOpen.set(false); this.products.load(); });
+    req.subscribe(() => { this.ok(); this.productOpen.set(false); this.products.load(); this.lookups.invalidate(); });
   }
 }

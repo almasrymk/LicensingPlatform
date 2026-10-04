@@ -4,6 +4,8 @@ import { Api } from '../core/api.service';
 import { LocalDatePipe, TranslatePipe } from '../core/i18n.service';
 import { PageHead, Pager, StateView, loader } from '../shared/ui';
 import { Icon } from '../shared/icon';
+import { AuthService } from '../core/auth.service';
+import { lookupSignals } from '../shared/media';
 
 @Component({
   selector: 'app-audit',
@@ -13,15 +15,36 @@ import { Icon } from '../shared/icon';
       <button class="btn" type="button" (click)="exportCsv()" [disabled]="!list.data()?.items?.length"><app-icon name="download" [size]="16" />{{ 'audit.export' | t }}</button>
     </app-page-head>
 
-    <div class="filters">
-      <input type="search" dir="ltr" placeholder="license., auth.login, tenant." [ngModel]="action()" (ngModelChange)="action.set($event); page.set(1)" [attr.aria-label]="'audit.action' | t" />
+    <div class="table-card">
+    <div class="filters" style="border:0;border-radius:0;box-shadow:none;border-bottom:1px solid var(--border);margin:0">
+      <div class="search">
+        <app-icon name="search" [size]="16" />
+        <input type="search" dir="ltr" [placeholder]="'filter.actionPh' | t" [ngModel]="action()" (ngModelChange)="action.set($event); page.set(1)" [attr.aria-label]="'audit.action' | t" />
+      </div>
+      <div class="search">
+        <app-icon name="user" [size]="16" />
+        <input type="search" [placeholder]="'filter.userPh' | t" [ngModel]="actor()" (ngModelChange)="actor.set($event); page.set(1)" [attr.aria-label]="'audit.actor' | t" />
+      </div>
+      <select [ngModel]="entityType()" (ngModelChange)="entityType.set($event); page.set(1)" [attr.aria-label]="'audit.entity' | t">
+        <option value="">{{ 'filter.allEntities' | t }}</option>
+        @for (e of entities; track e) { <option [value]="e">{{ e }}</option> }
+      </select>
+      @if (auth.isPlatformAdmin()) {
+        <select [ngModel]="tenantId()" (ngModelChange)="tenantId.set($event); page.set(1)" [attr.aria-label]="'common.tenant' | t">
+          <option value="">{{ 'filter.allTenants' | t }}</option>
+          @for (t of lk.tenants(); track t.id) { <option [value]="t.id">{{ t.name }}</option> }
+        </select>
+      }
       <select [ngModel]="success()" (ngModelChange)="success.set($event); page.set(1)" [attr.aria-label]="'audit.result' | t">
-        <option value="">{{ 'common.all' | t }}</option>
+        <option value="">{{ 'filter.allResults' | t }}</option>
         <option value="true">{{ 'audit.success' | t }}</option>
         <option value="false">{{ 'audit.failure' | t }}</option>
       </select>
-      <label class="inline">{{ 'common.from' | t }} <input type="date" [ngModel]="from()" (ngModelChange)="from.set($event); page.set(1)" /></label>
-      <label class="inline">{{ 'common.to' | t }} <input type="date" [ngModel]="to()" (ngModelChange)="to.set($event); page.set(1)" /></label>
+      <label class="date-pair"><span>{{ 'filter.date' | t }}</span><input type="date" [ngModel]="from()" (ngModelChange)="from.set($event); page.set(1)" />
+        <span>{{ 'filter.to' | t }}</span><input type="date" [ngModel]="to()" (ngModelChange)="to.set($event); page.set(1)" /></label>
+      @if (action() || actor() || entityType() || tenantId() || success() || from() || to()) {
+        <button class="btn btn-sm btn-ghost" type="button" (click)="clear()">{{ 'filter.clear' | t }}</button>
+      }
     </div>
 
     <app-state [loading]="list.loading() && !list.data()" [error]="list.error()" [empty]="list.data()?.total === 0" (retry)="list.load()">
@@ -48,17 +71,24 @@ import { Icon } from '../shared/icon';
       </div>
       <app-pager [(page)]="page" [total]="list.data()?.total ?? 0" [pageSize]="50" />
     </app-state>
+    </div>
   `,
 })
 export class AuditPage {
   private api = inject(Api);
+  readonly auth = inject(AuthService);
+  readonly lk = lookupSignals();
+  readonly entities = ['Tenant', 'Customer', 'Product', 'Plan', 'Subscription', 'License', 'Activation', 'User', 'ApiClient', 'SigningKey'];
+  readonly actor = signal('');
+  readonly entityType = signal('');
+  readonly tenantId = signal('');
   readonly action = signal('');
   readonly success = signal('');
   readonly from = signal('');
   readonly to = signal('');
   readonly page = signal(1);
   readonly list = loader(() => this.api.audit({
-    action: this.action(), success: this.success(), page: this.page(), pageSize: 50,
+    action: this.action(), actor: this.actor(), entityType: this.entityType(), tenantId: this.tenantId(), success: this.success(), page: this.page(), pageSize: 50,
     from: this.from() ? new Date(this.from()).toISOString() : null,
     to: this.to() ? new Date(this.to() + 'T23:59:59').toISOString() : null,
   }), false);
@@ -69,6 +99,11 @@ export class AuditPage {
     if (/revoked|suspended|reset|rotated|deactivat|cancel/.test(action)) return 'warn';
     if (/created|issued|renewed|activated|published|resumed/.test(action)) return 'ok';
     return 'info';
+  }
+
+  clear() {
+    this.action.set(''); this.actor.set(''); this.entityType.set(''); this.tenantId.set(''); this.success.set('');
+    this.from.set(''); this.to.set(''); this.page.set(1);
   }
 
   exportCsv() {
@@ -86,6 +121,6 @@ export class AuditPage {
   }
 
   constructor() {
-    effect(() => { this.action(); this.success(); this.from(); this.to(); this.page(); this.list.load(); });
+    effect(() => { this.action(); this.actor(); this.entityType(); this.tenantId(); this.success(); this.from(); this.to(); this.page(); this.list.load(); });
   }
 }
