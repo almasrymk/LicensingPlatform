@@ -97,10 +97,6 @@ export class Login {
 
   readonly demo = [
     { email: 'admin@licensing.local', password: 'Admin@12345', role: 'PlatformAdmin' },
-    { email: 'admin@nour.test', password: 'Demo@12345', role: 'TenantAdmin' },
-    { email: 'ops@nour.test', password: 'Demo@12345', role: 'TenantOperator' },
-    { email: 'user@alamal.test', password: 'Demo@12345', role: 'CustomerUser' },
-    { email: 'user@almanar.test', password: 'Demo@12345', role: 'CustomerUser' },
   ];
 
   fill(email: string, password: string) { this.email = email; this.password = password; }
