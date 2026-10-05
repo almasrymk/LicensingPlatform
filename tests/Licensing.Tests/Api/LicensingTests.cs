@@ -462,6 +462,36 @@ public sealed class OfflineTokenTests : IClassFixture<TestAppFixture>
     }
 }
 
+/// <summary>A database restored on another server names a signing key whose private file is not there: signing must recover.</summary>
+public sealed class MissingSigningKeyTests : IClassFixture<TestAppFixture>
+{
+    private readonly TestApp _app;
+    public MissingSigningKeyTests(TestAppFixture f) => _app = f.App;
+
+    [Fact]
+    public async Task Activation_rotates_to_a_new_key_when_the_active_private_key_is_missing()
+    {
+        // An active key whose private half exists nowhere on this server (as after restoring a backup elsewhere).
+        using var orphan = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        const string orphanKid = "lk-restored-elsewhere";
+        await _app.WithDbAsync(async db =>
+        {
+            db.SigningKeys.Add(Licensing.Domain.Licensing.SigningKey.Create(orphanKid, "ES256", orphan.ExportSubjectPublicKeyInfoPem(), DateTimeOffset.UtcNow.AddMinutes(5)));
+            await db.SaveChangesAsync();
+            return 0;
+        });
+
+        var device = await _app.ClientTokenAsync(DemoAccounts.NourClientId, DemoAccounts.NourClientSecret);
+        var issued = await new LicenseSetup(_app).IssueAsync();
+        var activated = await (await device.PostJsonAsync("/api/v1/licensing/activate", new { productKey = issued.Key, deviceId = "RESTORED-DB-DEVICE" })).OkJsonAsync();
+
+        var kid = activated.GetProperty("kid").GetString();
+        Assert.NotEqual(orphanKid, kid);
+        var validated = await (await device.PostJsonAsync("/api/v1/licensing/validate", new { productKey = issued.Key, deviceId = "RESTORED-DB-DEVICE" })).OkJsonAsync();
+        Assert.Equal(kid, validated.GetProperty("kid").GetString());
+    }
+}
+
 /// <summary>Critical scenario 8: an outbox event is published after a worker restart and never consumed twice.</summary>
 public sealed class OutboxTests : IClassFixture<TestAppFixture>
 {

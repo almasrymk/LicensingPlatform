@@ -8,6 +8,7 @@ using Licensing.Domain.Licensing;
 using Licensing.Infrastructure.Persistence;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
@@ -54,7 +55,8 @@ public sealed class FileSecretStore(IOptions<LicenseSigningOptions> options, IDa
 /// Signs offline license tokens with ECDSA P-256 (ES256, ADR-004). Each key has a kid; rotation moves the current key to
 /// "retiring" (still published for verification) so tokens signed before the rotation stay valid.
 /// </summary>
-public sealed class EcdsaLicenseTokenSigner(AppDbContext db, ISecretStore secrets, IOptions<LicenseSigningOptions> options, TimeProvider clock)
+public sealed class EcdsaLicenseTokenSigner(AppDbContext db, ISecretStore secrets, IOptions<LicenseSigningOptions> options, TimeProvider clock,
+    ILogger<EcdsaLicenseTokenSigner> logger)
     : ILicenseTokenSigner
 {
     public const string Algorithm = SecurityAlgorithms.EcdsaSha256;
@@ -67,7 +69,16 @@ public sealed class EcdsaLicenseTokenSigner(AppDbContext db, ISecretStore secret
             .OrderByDescending(k => k.CreatedAt).Select(k => k.Kid).FirstOrDefaultAsync(ct)
             ?? await RotateAsync(ct);
 
-        var ecdsa = await LoadPrivateKeyAsync(kid, ct);
+        var ecdsa = await TryLoadPrivateKeyAsync(kid, ct);
+        if (ecdsa is null)
+        {
+            // The database names a key whose private half this server cannot read: the database was restored on another
+            // machine, the key files were not deployed, or the Data Protection key ring changed. Start a new key so
+            // signing keeps working; the old public key stays published (retiring) for tokens already issued.
+            logger.LogWarning("Private key for signing key {Kid} is missing or unreadable on this server; rotating to a new key", kid);
+            kid = await RotateAsync(ct);
+            ecdsa = PrivateKeys[kid];
+        }
         var now = clock.GetUtcNow();
         var claims = new List<Claim>
         {
@@ -126,11 +137,19 @@ public sealed class EcdsaLicenseTokenSigner(AppDbContext db, ISecretStore secret
         }
     }
 
-    private async Task<ECDsa> LoadPrivateKeyAsync(string kid, CancellationToken ct)
+    private async Task<ECDsa?> TryLoadPrivateKeyAsync(string kid, CancellationToken ct)
     {
         if (PrivateKeys.TryGetValue(kid, out var cached)) return cached;
-        var pem = await secrets.GetAsync(kid, ct)
-            ?? throw new InvalidOperationException($"Private key for signing key '{kid}' is missing from the secret store.");
+        string? pem;
+        try
+        {
+            pem = await secrets.GetAsync(kid, ct);
+        }
+        catch (CryptographicException)
+        {
+            return null; // Encrypted with a Data Protection key this server does not have.
+        }
+        if (pem is null) return null;
         var ecdsa = ECDsa.Create();
         ecdsa.ImportFromPem(pem);
         return PrivateKeys.GetOrAdd(kid, ecdsa);
