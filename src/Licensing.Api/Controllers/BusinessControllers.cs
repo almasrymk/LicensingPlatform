@@ -76,6 +76,10 @@ public sealed class PlansController(CatalogService catalog) : ControllerBase
     [HasPermission(Permissions.CatalogManage)]
     public async Task<IActionResult> Archive(Guid id, CancellationToken ct) => this.ToActionResult(await catalog.ArchivePlanAsync(id, ct));
 
+    [HttpDelete("{id:guid}")]
+    [HasPermission(Permissions.CatalogManage)]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct) => this.ToActionResult(await catalog.DeletePlanAsync(id, ct));
+
     [HttpPost("{id:guid}/new-version")]
     [HasPermission(Permissions.CatalogManage)]
     public async Task<IActionResult> NewVersion(Guid id, CancellationToken ct) =>

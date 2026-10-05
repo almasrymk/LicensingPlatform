@@ -153,6 +153,21 @@ public sealed class CatalogService(IAppDbContext db, ICurrentUser me, ITenantCon
         return await GetPlanAsync(id, ct);
     }
 
+    /// <summary>Deletes a draft plan that nothing was ever sold on. Published plans are archived instead, so history stays intact.</summary>
+    public async Task<Result> DeletePlanAsync(Guid id, CancellationToken ct)
+    {
+        var plan = await db.Plans.FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (plan is null) return AppErrors.NotFound("Plan");
+        if (plan.Status != PlanStatus.Draft)
+            return Error.Conflict("PLAN_NOT_DRAFT", "Only draft plans can be deleted; archive a published plan instead.");
+        if (await db.Subscriptions.AnyAsync(s => s.PlanId == id, ct) || await db.Licenses.AnyAsync(l => l.PlanId == id, ct))
+            return Error.Conflict("PLAN_IN_USE", "The plan has subscriptions or licenses; archive it instead.");
+        db.Plans.Remove(plan);
+        audit.Add("plan.deleted", "Plan", id.ToString(), tenantId: plan.TenantId, details: $"{plan.Code} v{plan.Version}");
+        await db.SaveChangesAsync(ct);
+        return Result.Success();
+    }
+
     public async Task<Result<PlanDto>> NewPlanVersionAsync(Guid id, CancellationToken ct)
     {
         var plan = await db.Plans.FirstOrDefaultAsync(p => p.Id == id, ct);

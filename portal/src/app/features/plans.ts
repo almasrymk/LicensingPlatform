@@ -63,6 +63,7 @@ import { Avatar } from '../shared/media';
               @if (pl.status === 'Draft') {
                 <button class="btn" type="button" (click)="editPlan(pl)">{{ 'plans.manage' | t }}</button>
                 <button class="btn btn-primary" type="button" (click)="act(pl, 'publish')">{{ 'plans.publish' | t }}</button>
+                <button class="btn btn-ghost danger" type="button" (click)="remove(pl)">{{ 'plans.delete' | t }}</button>
               } @else if (pl.status === 'Published') {
                 <button class="btn" type="button" (click)="act(pl, 'version')">{{ 'plans.newVersion' | t }}</button>
                 <button class="btn btn-ghost" type="button" (click)="act(pl, 'archive')">{{ 'plans.archive' | t }}</button>
@@ -169,5 +170,10 @@ export class PlansPage {
   act(pl: Plan, action: 'publish' | 'archive' | 'version') {
     const req = action === 'publish' ? this.api.publishPlan(pl.id) : action === 'archive' ? this.api.archivePlan(pl.id) : this.api.newPlanVersion(pl.id);
     req.subscribe(() => { this.ok(); this.plans.load(); });
+  }
+
+  remove(pl: Plan) {
+    if (!confirm(this.i18n.t('plans.deleteConfirm'))) return;
+    this.api.deletePlan(pl.id).subscribe(() => { this.ok(); this.plans.load(); });
   }
 }

@@ -462,6 +462,35 @@ public sealed class OfflineTokenTests : IClassFixture<TestAppFixture>
     }
 }
 
+/// <summary>Draft plans can be deleted; published or used plans cannot.</summary>
+public sealed class PlanDeleteTests : IClassFixture<TestAppFixture>
+{
+    private readonly TestApp _app;
+    public PlanDeleteTests(TestAppFixture f) => _app = f.App;
+
+    [Fact]
+    public async Task Only_unused_draft_plans_can_be_deleted()
+    {
+        var issued = await new LicenseSetup(_app).IssueAsync();
+        var admin = issued.Admin;
+
+        var draft = await (await admin.PostJsonAsync("/api/v1/plans", new
+        {
+            productId = issued.ProductId, code = "DRAFT1", name = "مسودة", price = 10, currency = "EGP", durationDays = 30, maxActivations = 1,
+            heartbeatIntervalHours = 24, offlineGraceDays = 7, features = Array.Empty<string>(),
+        })).OkJsonAsync(HttpStatusCode.Created);
+        var draftId = draft.GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.NoContent, (await admin.DeleteAsync($"/api/v1/plans/{draftId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync($"/api/v1/plans/{draftId}")).StatusCode);
+
+        // The plan behind a live subscription is published and in use: it can only be archived.
+        var used = await admin.DeleteAsync($"/api/v1/plans/{issued.PlanId}");
+        Assert.Equal(HttpStatusCode.Conflict, used.StatusCode);
+        Assert.Equal("PLAN_NOT_DRAFT", await used.ErrorCodeAsync());
+    }
+}
+
 /// <summary>A database restored on another server names a signing key whose private file is not there: signing must recover.</summary>
 public sealed class MissingSigningKeyTests : IClassFixture<TestAppFixture>
 {

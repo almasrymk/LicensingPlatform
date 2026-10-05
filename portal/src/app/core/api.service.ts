@@ -60,6 +60,7 @@ export class Api {
   updatePlan(id: string, body: SavePlan) { return this.http.put<Plan>(`${this.base}/plans/${id}`, body); }
   publishPlan(id: string) { return this.http.post<Plan>(`${this.base}/plans/${id}/publish`, {}); }
   archivePlan(id: string) { return this.http.post<Plan>(`${this.base}/plans/${id}/archive`, {}); }
+  deletePlan(id: string) { return this.http.delete<void>(`${this.base}/plans/${id}`); }
   newPlanVersion(id: string) { return this.http.post<Plan>(`${this.base}/plans/${id}/new-version`, {}); }
 
   // Subscriptions

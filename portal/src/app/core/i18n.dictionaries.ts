@@ -46,7 +46,7 @@ export const AR: Record<string, string> = {
   'plans.price': 'السعر', 'plans.currency': 'العملة', 'plans.duration': 'المدة (أيام)', 'plans.durationHint': 'اتركها فارغة لمدى الحياة',
   'plans.trial': 'أيام التجربة', 'plans.maxActivations': 'أقصى عدد أجهزة', 'plans.maxHint': 'اتركه فارغاً لغير محدود',
   'plans.heartbeat': 'فترة الاتصال (ساعات)', 'plans.grace': 'السماح بدون اتصال (أيام)', 'plans.features': 'المزايا (مفصولة بفاصلة)',
-  'plans.publish': 'نشر', 'plans.archive': 'أرشفة', 'plans.newVersion': 'إصدار جديد', 'plans.immutable': 'الخطة المنشورة لا تُعدَّل؛ أنشئ إصداراً جديداً.',
+  'plans.publish': 'نشر', 'plans.archive': 'أرشفة', 'plans.delete': 'حذف', 'plans.deleteConfirm': 'حذف الخطة نهائياً؟', 'codes.PLAN_IN_USE': 'الخطة عليها اشتراكات أو تراخيص؛ استخدم الأرشفة بدل الحذف.', 'plans.newVersion': 'إصدار جديد', 'plans.immutable': 'الخطة المنشورة لا تُعدَّل؛ أنشئ إصداراً جديداً.',
   'plans.entitlements': 'الصلاحيات الممنوحة',
 
   'subs.title': 'الاشتراكات', 'subs.new': 'اشتراك جديد', 'subs.start': 'البداية', 'subs.end': 'النهاية', 'subs.trialEnds': 'نهاية التجربة',
@@ -401,7 +401,7 @@ export const EN: Record<string, string> = {
   'plans.price': 'Price', 'plans.currency': 'Currency', 'plans.duration': 'Duration (days)', 'plans.durationHint': 'Leave empty for lifetime',
   'plans.trial': 'Trial days', 'plans.maxActivations': 'Max devices', 'plans.maxHint': 'Leave empty for unlimited',
   'plans.heartbeat': 'Heartbeat (hours)', 'plans.grace': 'Offline grace (days)', 'plans.features': 'Features (comma separated)',
-  'plans.publish': 'Publish', 'plans.archive': 'Archive', 'plans.newVersion': 'New version', 'plans.immutable': 'Published plans are immutable; create a new version.',
+  'plans.publish': 'Publish', 'plans.archive': 'Archive', 'plans.delete': 'Delete', 'plans.deleteConfirm': 'Delete this plan permanently?', 'codes.PLAN_IN_USE': 'The plan has subscriptions or licenses; archive it instead.', 'plans.newVersion': 'New version', 'plans.immutable': 'Published plans are immutable; create a new version.',
   'plans.entitlements': 'Entitlements',
 
   'subs.title': 'Subscriptions', 'subs.new': 'New Subscription', 'subs.start': 'Start', 'subs.end': 'End', 'subs.trialEnds': 'Trial ends',
