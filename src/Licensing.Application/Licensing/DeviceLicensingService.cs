@@ -16,14 +16,15 @@ public sealed record DeactivateRequest(string ProductKey, string DeviceId);
 public sealed record LicenseCheckResponse(
     string Status, string LicenseNumber, string ProductCode, string PlanCode, IReadOnlyList<string> Features,
     DateTimeOffset? ExpiresAt, int? MaxActivations, int ActiveActivations, DateTimeOffset CheckAfter,
-    DateTimeOffset OfflineValidUntil, string Token, string Kid, bool AlreadyActivated = false);
+    DateTimeOffset OfflineValidUntil, string Token, string Kid, bool AlreadyActivated = false,
+    Guid LicenseId = default, Guid CustomerId = default, Guid SubscriptionId = default);
 
 /// <summary>Cached projection used by validate. Contains no secrets.</summary>
 public sealed record LicenseSnapshot(
     Guid LicenseId, Guid TenantId, Guid CustomerId, string LicenseNumber, string ProductCode, string PlanCode,
     LicenseStatus Status, DateTimeOffset? ExpiresAt, IReadOnlyList<string> Features, int? MaxActivations,
     int ActiveActivations, int HeartbeatIntervalHours, int OfflineGraceDays, SubscriptionStatus SubscriptionStatus,
-    bool TenantActive, bool CustomerActive, IReadOnlyList<string> ActiveDevices);
+    bool TenantActive, bool CustomerActive, IReadOnlyList<string> ActiveDevices, Guid SubscriptionId = default);
 
 /// <summary>
 /// The endpoints called by licensed software (through an API client token). Implements the activation rules of plan section 19:
@@ -137,6 +138,34 @@ public sealed class DeviceLicensingService(
         return await RespondAsync(snapshot, deviceId, now, false, ct);
     }
 
+    /// <summary>Heartbeat of an activated device addressed by licence id (LP-5): same rules as <see cref="HeartbeatAsync"/>.</summary>
+    public async Task<Result<LicenseCheckResponse>> HeartbeatByLicenseAsync(Guid licenseId, string deviceId, string? appVersion, string? os, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        deviceId = deviceId?.Trim() ?? "";
+        if (!LicenseActivation.IsValidDeviceId(deviceId)) return LicenseErrors.InvalidDevice;
+        var license = await db.Licenses.AsNoTracking().FirstOrDefaultAsync(l => l.Id == licenseId, ct);
+        if (license is null) return LicenseErrors.InvalidLicense;
+        var snapshot = await LoadSnapshotAsync(license, ct);
+        if (snapshot is null) return LicenseErrors.InvalidLicense;
+        if (CheckRules(snapshot, null, now) is { } error) return error;
+
+        var activation = await db.LicenseActivations.FirstOrDefaultAsync(
+            a => a.LicenseId == licenseId && a.DeviceId == deviceId && a.Status == ActivationStatus.Active, ct);
+        if (activation is null) return LicenseErrors.DeviceNotActivated;
+        activation.Heartbeat(appVersion, caller.IpAddress, now, os);
+        await db.SaveChangesAsync(ct);
+        return await RespondAsync(snapshot, deviceId, now, false, ct);
+    }
+
+    /// <summary>Releases a device's seat addressed by licence id (LP-5).</summary>
+    public async Task<Result> ReleaseByLicenseAsync(Guid licenseId, string deviceId, CancellationToken ct)
+    {
+        var license = await db.Licenses.FirstOrDefaultAsync(l => l.Id == licenseId, ct);
+        if (license is null) return LicenseErrors.InvalidLicense;
+        return await ReleaseAsync(license, deviceId?.Trim() ?? "", ct);
+    }
+
     public async Task<Result> DeactivateAsync(DeactivateRequest request, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
@@ -144,7 +173,12 @@ public sealed class DeviceLicensingService(
         var deviceId = request.DeviceId?.Trim() ?? "";
         var license = hash is null ? null : await db.Licenses.FirstOrDefaultAsync(l => l.ProductKeyHash == hash, ct);
         if (license is null) return LicenseErrors.InvalidLicense;
+        return await ReleaseAsync(license, deviceId, ct);
+    }
 
+    private async Task<Result> ReleaseAsync(License license, string deviceId, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
         var activation = await db.LicenseActivations.FirstOrDefaultAsync(
             a => a.LicenseId == license.Id && a.DeviceId == deviceId && a.Status == ActivationStatus.Active, ct);
         if (activation is null) return LicenseErrors.DeviceNotActivated;
@@ -192,7 +226,7 @@ public sealed class DeviceLicensingService(
 
         return new LicenseSnapshot(l.Id, l.TenantId, l.CustomerId, l.LicenseNumber, l.ProductCode, l.PlanCode, l.Status, l.ExpiresAt,
             l.Features, l.MaxActivations, active, l.HeartbeatIntervalHours, l.OfflineGraceDays, info.Status,
-            info.TenantActive, info.CustomerActive, devices);
+            info.TenantActive, info.CustomerActive, devices, l.SubscriptionId);
     }
 
     private async Task<Result<LicenseCheckResponse>> RespondAsync(LicenseSnapshot s, string deviceId, DateTimeOffset now, bool alreadyActivated, CancellationToken ct)
@@ -205,10 +239,11 @@ public sealed class DeviceLicensingService(
 
         var token = await signer.SignAsync(new LicenseTokenClaims(
             s.LicenseNumber, s.LicenseId, s.TenantId, s.ProductCode, s.PlanCode, deviceId, s.Features,
-            s.ExpiresAt, checkAfter, offlineUntil), ct);
+            s.ExpiresAt, checkAfter, offlineUntil, s.CustomerId), ct);
 
         return new LicenseCheckResponse("active", s.LicenseNumber, s.ProductCode, s.PlanCode, s.Features, s.ExpiresAt,
-            s.MaxActivations, s.ActiveActivations, checkAfter, offlineUntil, token.Token, token.Kid, alreadyActivated);
+            s.MaxActivations, s.ActiveActivations, checkAfter, offlineUntil, token.Token, token.Kid, alreadyActivated,
+            s.LicenseId, s.CustomerId, s.SubscriptionId);
     }
 
     private async Task<Result<LicenseCheckResponse>> FailAttemptAsync(

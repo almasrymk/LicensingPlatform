@@ -44,3 +44,8 @@
 
 ## ADR-013 — حالات Subscription وLicense
 **القرار:** Subscription: `Trial → Active`، `Renew` (Trial/Active/Expired)، `ChangePlan` (Trial/Active)، `Suspend`/`Resume`، `Cancel` (نهائي)، `Expire` (job). License: `Active ↔ Suspended`، `Revoked` (نهائي)، `Expired` (بانتهاء تاريخها أو بانتهاء/إلغاء الاشتراك، وترجع عند التجديد). فترة السماح offline = `HeartbeatInterval + OfflineGraceDays`.
+
+## ADR-012 — واجهة التكامل مع Monitor Cloud
+**السياق:** منصة Monitor Cloud تحتاج قراءة العملاء والاشتراكات والخطط، وتجديد/تحرير مقاعد الأجهزة بعد التفعيل بدون مفتاح المنتج، ومتابعة التغييرات أولًا بأول.
+**القرار:** `IntegrationController` على `api/v1/integration` لتوكنات الـ API clients فقط، بنطاقات جديدة `customers.read` و`subscriptions.read` و`catalog.read` (LP-1/LP-3)، وبنفس rate limit الخاص بالـ licensing. رد التفعيل والتحقق يتضمن `licenseId` و`customerId` و`subscriptionId`، والتوكن الموقّع يتضمن claim `cid` (LP-2). الـ change feed يقرأ `messaging.OutboxMessages` للـ tenant بترتيب `(OccurredAt, Id)` مع cursor، ولهذا أُضيف عمود `CustomerId` للـ outbox (LP-4). heartbeat وrelease برقم الرخصة (LP-5).
+**النتائج:** الحقول والـ claims القديمة لم تتغير، فالبرامج الحالية لا تتأثر. `updatedSince` في قائمة العملاء يعتمد على تاريخ الإنشاء لأن العميل لا يحمل تاريخ تعديل بعد.

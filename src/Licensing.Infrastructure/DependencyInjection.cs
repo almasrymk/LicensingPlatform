@@ -43,6 +43,7 @@ public static class DependencyInjection
                 options.UseSqlServer(connectionString, sql => sql.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"));
         });
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
+        services.AddScoped<Licensing.Application.Integrations.IChangeFeed, Messaging.ChangeFeed>();
 
         // ---- Request context ----
         services.AddScoped<ICurrentUser, HttpCurrentUser>();

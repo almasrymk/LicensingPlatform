@@ -10,8 +10,11 @@ public static class ApiScopes
     public const string LicensesValidate = "licenses.validate";
     public const string LicensesIssue = "licenses.issue";
     public const string LicensesRead = "licenses.read";
+    public const string CustomersRead = "customers.read";
+    public const string SubscriptionsRead = "subscriptions.read";
+    public const string CatalogRead = "catalog.read";
 
-    public static readonly string[] All = [LicensesActivate, LicensesValidate, LicensesIssue, LicensesRead];
+    public static readonly string[] All = [LicensesActivate, LicensesValidate, LicensesIssue, LicensesRead, CustomersRead, SubscriptionsRead, CatalogRead];
 }
 
 /// <summary>A machine client of a tenant. Its secret is shown once at creation or rotation and stored hashed.</summary>

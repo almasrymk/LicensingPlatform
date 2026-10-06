@@ -93,6 +93,8 @@ public sealed class EcdsaLicenseTokenSigner(AppDbContext db, ISecretStore secret
         };
         if (c.LicenseExpiresAt is { } exp)
             claims.Add(new Claim("lic_exp", exp.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64));
+        if (c.CustomerId != Guid.Empty)
+            claims.Add(new Claim("cid", c.CustomerId.ToString()));
 
         var key = new ECDsaSecurityKey(ecdsa) { KeyId = kid };
         var token = new JwtSecurityToken(options.Value.Issuer, c.ProductCode, claims, now.UtcDateTime, c.OfflineValidUntil.UtcDateTime,

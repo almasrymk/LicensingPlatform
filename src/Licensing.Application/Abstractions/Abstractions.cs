@@ -106,7 +106,8 @@ public interface IProductKeyGenerator
 
 public sealed record LicenseTokenClaims(
     string LicenseNumber, Guid LicenseId, Guid TenantId, string ProductCode, string PlanCode, string DeviceId,
-    IReadOnlyList<string> Features, DateTimeOffset? LicenseExpiresAt, DateTimeOffset CheckAfter, DateTimeOffset OfflineValidUntil);
+    IReadOnlyList<string> Features, DateTimeOffset? LicenseExpiresAt, DateTimeOffset CheckAfter, DateTimeOffset OfflineValidUntil,
+    Guid CustomerId = default);
 
 public sealed record SignedLicenseToken(string Token, string Kid, DateTimeOffset ExpiresAt);
 

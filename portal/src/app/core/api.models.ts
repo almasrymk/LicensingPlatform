@@ -87,7 +87,7 @@ export interface ApiClient {
   createdAt: string; secretRotatedAt: string; lastUsedAt?: string;
 }
 export interface ApiClientSecret { client: ApiClient; clientSecret: string; }
-export const ApiScopes = ['licenses.activate', 'licenses.validate', 'licenses.issue', 'licenses.read'];
+export const ApiScopes = ['licenses.activate', 'licenses.validate', 'licenses.issue', 'licenses.read', 'customers.read', 'subscriptions.read', 'catalog.read'];
 
 export interface User {
   id: string; email: string; fullName: string; role: Role; tenantId?: string; tenantName?: string; customerId?: string;

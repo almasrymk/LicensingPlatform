@@ -7,6 +7,8 @@ public sealed class OutboxMessage
     public string Type { get; set; } = null!;
     public string Payload { get; set; } = null!;
     public Guid? TenantId { get; set; }
+    /// <summary>The customer the event is about, for the integration change feed (LP-4). Null for tenant-level events.</summary>
+    public Guid? CustomerId { get; set; }
     public DateTimeOffset OccurredAt { get; set; }
     public DateTimeOffset? ProcessedAt { get; set; }
     public int Attempts { get; set; }

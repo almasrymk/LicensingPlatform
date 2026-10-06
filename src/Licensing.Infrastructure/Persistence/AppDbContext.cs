@@ -145,6 +145,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
                     Type = domainEvent.GetType().Name,
                     Payload = JsonSerializer.Serialize(domainEvent, domainEvent.GetType()),
                     TenantId = (aggregate as ITenantOwned)?.TenantId,
+                    CustomerId = (aggregate as ICustomerOwned)?.CustomerId ?? (aggregate as Domain.Customers.Customer)?.Id,
                     OccurredAt = domainEvent.OccurredAt,
                 });
             }

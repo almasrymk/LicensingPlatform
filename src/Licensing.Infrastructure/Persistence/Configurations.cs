@@ -278,6 +278,7 @@ internal sealed class OutboxConfig : IEntityTypeConfiguration<OutboxMessage>
     {
         b.ToTable("OutboxMessages", "messaging");
         b.HasIndex(x => new { x.ProcessedAt, x.DeadLettered, x.NextAttemptAt });
+        b.HasIndex(x => new { x.TenantId, x.OccurredAt, x.Id });
         b.Property(x => x.Type).HasMaxLength(128);
         b.Property(x => x.Payload).HasMaxLength(-1);
         b.Property(x => x.LastError).HasMaxLength(2000);
