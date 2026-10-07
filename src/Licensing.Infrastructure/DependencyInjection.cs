@@ -61,7 +61,8 @@ public static class DependencyInjection
         {
             var keyRing = cfg["DataProtection:KeyRingPath"];
             if (!string.IsNullOrWhiteSpace(keyRing))
-                o.XmlRepository = new FileSystemXmlRepository(new DirectoryInfo(keyRing), logs);
+                o.XmlRepository = new FileSystemXmlRepository(
+                    new DirectoryInfo(Path.IsPathRooted(keyRing) ? keyRing : Path.Combine(AppContext.BaseDirectory, keyRing)), logs);
         });
 
         // ---- Cache: Redis when configured, otherwise in-memory (single instance / development). ----

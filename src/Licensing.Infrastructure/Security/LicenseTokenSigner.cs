@@ -33,7 +33,10 @@ public interface ISecretStore
 public sealed class FileSecretStore(IOptions<LicenseSigningOptions> options, IDataProtectionProvider dataProtection) : ISecretStore
 {
     private readonly IDataProtector _protector = dataProtection.CreateProtector("Licensing.SigningKeys.v1");
-    private readonly string _root = Path.GetFullPath(options.Value.KeyStorePath);
+    // Relative paths are resolved against the app folder, not the process working directory (which IIS may set elsewhere).
+    private readonly string _root = Path.IsPathRooted(options.Value.KeyStorePath)
+        ? options.Value.KeyStorePath
+        : Path.Combine(AppContext.BaseDirectory, options.Value.KeyStorePath);
 
     public async Task<string?> GetAsync(string name, CancellationToken ct)
     {
@@ -145,9 +148,11 @@ public sealed class EcdsaLicenseTokenSigner(AppDbContext db, ISecretStore secret
         {
             pem = await secrets.GetAsync(kid, ct);
         }
-        catch (CryptographicException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return null; // Encrypted with a Data Protection key this server does not have.
+            // Encrypted with a Data Protection key this server does not have, or the file cannot be read.
+            logger.LogWarning(ex, "Could not read the private key for signing key {Kid}", kid);
+            return null;
         }
         if (pem is null) return null;
         var ecdsa = ECDsa.Create();
