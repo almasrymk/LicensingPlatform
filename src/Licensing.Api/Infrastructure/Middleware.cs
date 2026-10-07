@@ -24,6 +24,7 @@ public sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logge
         else
         {
             logger.LogError(exception, "Unhandled exception");
+            await RecordAsync(http, exception);
             error = new Error("INTERNAL_ERROR", "An unexpected error occurred. Quote the traceId when contacting support.", ErrorKind.Validation);
             var p500 = ApiResults.Problem(http, error);
             p500.Status = StatusCodes.Status500InternalServerError;
@@ -37,6 +38,27 @@ public sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logge
         http.Response.StatusCode = problem.Status!.Value;
         await http.Response.WriteAsJsonAsync(problem, (System.Text.Json.JsonSerializerOptions?)null, "application/problem+json", ct);
         return true;
+    }
+
+    /// <summary>
+    /// Also stores the failure in the audit log ("system.error"), so admins can read the cause in the portal on hosts where
+    /// log files are hard to reach. Never lets a logging failure hide the original error.
+    /// </summary>
+    private async Task RecordAsync(HttpContext http, Exception exception)
+    {
+        try
+        {
+            var inner = exception.InnerException is { } i ? $" | {i.GetType().Name}: {i.Message}" : "";
+            var frame = exception.StackTrace?.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? "";
+            var details = $"{http.Request.Method} {http.Request.Path} | {exception.GetType().Name}: {exception.Message}{inner} | {frame}";
+            if (details.Length > 1900) details = details[..1900];
+            var audit = http.RequestServices.GetRequiredService<Licensing.Application.Abstractions.IAuditLogger>();
+            await audit.WriteNowAsync("system.error", "Request", null, false, details, null, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not record the error in the audit log");
+        }
     }
 }
 
