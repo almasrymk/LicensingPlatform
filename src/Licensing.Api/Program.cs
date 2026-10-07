@@ -18,7 +18,11 @@ builder.Host.UseSerilog((ctx, services, log) => log
     .ReadFrom.Configuration(ctx.Configuration)
     .Enrich.FromLogContext()
     .Enrich.WithProperty("Application", "Licensing.Api")
-    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {CorrelationId} {Message:lj}{NewLine}{Exception}"));
+    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {CorrelationId} {Message:lj}{NewLine}{Exception}")
+    // Warnings and errors also go to App_Data/logs so they can be read on hosts without console access (IIS, shared hosting).
+    .WriteTo.File(Path.Combine(AppContext.BaseDirectory, "App_Data", "logs", "app-.log"),
+        restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Warning, rollingInterval: RollingInterval.Day, retainedFileCountLimit: 14,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u3}] {RequestPath} {Message:lj}{NewLine}{Exception}"));
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
