@@ -21,6 +21,8 @@ public static class LicenseErrors
     public static readonly Error DeviceNotActivated = Error.NotFound("LIC_DEVICE_NOT_ACTIVATED", "This device is not activated for the license.");
     public static readonly Error InvalidDevice = Error.Validation("LIC_INVALID_DEVICE", "Device id must be 8-128 characters of letters, digits, '-', '_', ':' or '.'.");
     public static readonly Error InvalidTransition = Error.Conflict("LIC_INVALID_TRANSITION", "This action is not allowed in the license's current state.");
+    public static readonly Error TrialUnavailable = Error.NotFound("LIC_TRIAL_UNAVAILABLE", "This product has no published plan with trial days.");
+    public static readonly Error TrialUsed = Error.Conflict("LIC_TRIAL_USED", "This device has already used its trial.");
 }
 
 public sealed class License : AggregateRoot, ICustomerOwned

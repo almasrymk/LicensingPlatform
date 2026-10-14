@@ -260,7 +260,7 @@ public sealed class LicenseService(
         return count;
     }
 
-    private static string NewLicenseNumber(DateTimeOffset now)
+    internal static string NewLicenseNumber(DateTimeOffset now)
     {
         const string alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
         Span<char> chars = stackalloc char[8];

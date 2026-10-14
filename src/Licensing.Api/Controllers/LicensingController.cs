@@ -67,6 +67,15 @@ public sealed class LicensingController(DeviceLicensingService licensing, IIdemp
     public async Task<IActionResult> Heartbeat(ValidateRequest request, CancellationToken ct) =>
         this.ToActionResult(await licensing.HeartbeatAsync(request, ct));
 
+    /// <summary>
+    /// Starts this device's one trial of a product, on the product's published plan with trial days. The product key is in the
+    /// response only this once; a device that already had a trial gets <c>LIC_TRIAL_USED</c>.
+    /// </summary>
+    [HttpPost("trial")]
+    [RequireScope(ApiScopes.LicensesActivate)]
+    public async Task<IActionResult> Trial(TrialRequest request, CancellationToken ct) =>
+        this.ToActionResult(await licensing.StartTrialAsync(request, ct));
+
     /// <summary>Releases this device's activation slot.</summary>
     [HttpPost("deactivate")]
     [RequireScope(ApiScopes.LicensesActivate)]
