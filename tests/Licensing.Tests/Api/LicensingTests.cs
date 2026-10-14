@@ -590,6 +590,7 @@ public sealed class DeviceTrialTests : IClassFixture<TestAppFixture>
 
         var trial = await (await device.PostJsonAsync("/api/v1/licensing/trial", body)).OkJsonAsync();
         var key = trial.GetProperty("productKey").GetString()!;
+        Assert.Equal(14, trial.GetProperty("trialDays").GetInt32());
         var license = trial.GetProperty("license");
         Assert.Equal("active", license.GetProperty("status").GetString());
         Assert.Equal(1, license.GetProperty("maxActivations").GetInt32());

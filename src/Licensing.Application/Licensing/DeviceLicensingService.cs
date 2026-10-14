@@ -15,7 +15,7 @@ public sealed record DeactivateRequest(string ProductKey, string DeviceId);
 public sealed record TrialRequest(string DeviceId, string? DeviceName, string? ProductCode, string? AppVersion, string? Os = null);
 
 /// <summary>A device's trial: the product key (returned once, like an issued key) and the activation result.</summary>
-public sealed record TrialResponse(string ProductKey, LicenseCheckResponse License);
+public sealed record TrialResponse(string ProductKey, LicenseCheckResponse License, int TrialDays);
 
 /// <summary>Response of activate, validate and heartbeat. <c>Token</c> lets the client keep working offline until <c>OfflineValidUntil</c>.</summary>
 public sealed record LicenseCheckResponse(
@@ -107,7 +107,7 @@ public sealed class DeviceLicensingService(
 
         var snapshot = await LoadSnapshotAsync(license, ct);
         var response = await RespondAsync(snapshot!, deviceId, now, alreadyActivated: false, ct);
-        return new TrialResponse(plainKey, response.Value);
+        return new TrialResponse(plainKey, response.Value, plan.TrialDays!.Value);
     }
 
     private static string TrialMarker(string deviceId) => $"device-trial:{deviceId}";
