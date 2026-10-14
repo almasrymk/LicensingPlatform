@@ -23,6 +23,8 @@ public static class LicenseErrors
     public static readonly Error InvalidTransition = Error.Conflict("LIC_INVALID_TRANSITION", "This action is not allowed in the license's current state.");
     public static readonly Error TrialUnavailable = Error.NotFound("LIC_TRIAL_UNAVAILABLE", "This product has no published plan with trial days.");
     public static readonly Error TrialUsed = Error.Conflict("LIC_TRIAL_USED", "This device has already used its trial.");
+    public static readonly Error FreeUnavailable = Error.NotFound("LIC_FREE_UNAVAILABLE", "This product has no current free plan.");
+    public static readonly Error FreeUsed = Error.Conflict("LIC_FREE_USED", "This device already has its free plan license.");
 }
 
 public sealed class License : AggregateRoot, ICustomerOwned

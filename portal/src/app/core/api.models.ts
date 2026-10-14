@@ -46,15 +46,17 @@ export interface Product {
 }
 
 export type PlanStatus = 'Draft' | 'Published' | 'Archived';
+export type PlanKind = 'Paid' | 'Trial' | 'Free';
 export interface Plan {
   id: string; tenantId: string; productId: string; productCode: string; productName: string; code: string; name: string;
   version: number; status: PlanStatus; price: number; currency: string; durationDays?: number | null; trialDays?: number | null;
   maxActivations?: number | null; heartbeatIntervalHours: number; offlineGraceDays: number; features: string[];
-  createdAt: string; publishedAt?: string;
+  createdAt: string; publishedAt?: string; kind: PlanKind; isCurrent: boolean;
 }
 export interface SavePlan {
   productId: string; code: string; name: string; price: number; currency: string; durationDays: number | null;
   trialDays: number | null; maxActivations: number | null; heartbeatIntervalHours: number; offlineGraceDays: number; features: string[];
+  kind: PlanKind;
 }
 
 export type SubscriptionStatus = 'Trial' | 'Active' | 'Suspended' | 'Cancelled' | 'Expired';

@@ -76,6 +76,15 @@ public sealed class LicensingController(DeviceLicensingService licensing, IIdemp
     public async Task<IActionResult> Trial(TrialRequest request, CancellationToken ct) =>
         this.ToActionResult(await licensing.StartTrialAsync(request, ct));
 
+    /// <summary>
+    /// Gives this device the product's current free plan. The product key is in the response only this once; a device that
+    /// already has its free license gets <c>LIC_FREE_USED</c>.
+    /// </summary>
+    [HttpPost("free")]
+    [RequireScope(ApiScopes.LicensesActivate)]
+    public async Task<IActionResult> Free(TrialRequest request, CancellationToken ct) =>
+        this.ToActionResult(await licensing.StartFreeAsync(request, ct));
+
     /// <summary>Releases this device's activation slot.</summary>
     [HttpPost("deactivate")]
     [RequireScope(ApiScopes.LicensesActivate)]

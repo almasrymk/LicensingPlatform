@@ -110,6 +110,12 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.Property<int>("HeartbeatIntervalHours")
                         .HasColumnType("int");
 
+                    b.Property<bool>("IsCurrent")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
                     b.Property<int?>("MaxActivations")
                         .HasColumnType("int");
 

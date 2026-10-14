@@ -14,6 +14,9 @@ public sealed record ValidateRequest(string ProductKey, string DeviceId, string?
 public sealed record DeactivateRequest(string ProductKey, string DeviceId);
 public sealed record TrialRequest(string DeviceId, string? DeviceName, string? ProductCode, string? AppVersion, string? Os = null);
 
+/// <summary>A device's free plan: the product key (returned once) and the activation result. No expiry for a lifetime free plan.</summary>
+public sealed record FreePlanResponse(string ProductKey, LicenseCheckResponse License, string PlanCode, int? DurationDays);
+
 /// <summary>A device's trial: the product key (returned once, like an issued key) and the activation result.</summary>
 public sealed record TrialResponse(string ProductKey, LicenseCheckResponse License, int TrialDays);
 
@@ -48,9 +51,11 @@ public sealed class DeviceLicensingService(
 
     /// <summary>The customer that owns trial licenses started by devices themselves, one per tenant.</summary>
     public const string TrialCustomerName = "Trial devices";
+    public const string FreeCustomerName = "Free plan devices";
 
     /// <summary>
-    /// Starts the one trial a device gets for a product: a subscription on the product's published plan with trial days, a
+    /// Starts the one trial a device gets for a product: a subscription on the product's current trial plan (or, when no
+    /// trial plan was chosen, the first published plan with trial days, by code), a
     /// license for one device that ends with the trial, and this device's activation. A device that already had a trial
     /// gets <see cref="LicenseErrors.TrialUsed"/>; the product key is returned only here, once.
     /// </summary>
@@ -64,10 +69,11 @@ public sealed class DeviceLicensingService(
         var productCode = request.ProductCode?.Trim() ?? "";
         var product = productCode.Length == 0 ? null
             : await db.Products.FirstOrDefaultAsync(p => p.TenantId == tenantId && p.Code == productCode && p.IsActive, ct);
-        var plan = product is null ? null : await db.Plans
-            .Where(p => p.TenantId == tenantId && p.ProductId == product.Id && p.Status == PlanStatus.Published && p.TrialDays > 0)
+        var plan = product is null ? null : await CurrentOfferAsync(tenantId, product.Id, PlanKind.Trial, ct) ?? await db.Plans
+            .Where(p => p.TenantId == tenantId && p.ProductId == product.Id && p.Status == PlanStatus.Published && p.TrialDays > 0
+                && p.Kind != PlanKind.Free)
             .OrderBy(p => p.Code).FirstOrDefaultAsync(ct);
-        if (product is null || plan is null) return LicenseErrors.TrialUnavailable;
+        if (product is null || plan is null || plan.TrialDays is null) return LicenseErrors.TrialUnavailable;
 
         // The marker is kept on the subscription, so a device cannot start a second trial by reinstalling.
         var marker = TrialMarker(deviceId);
@@ -111,6 +117,66 @@ public sealed class DeviceLicensingService(
     }
 
     private static string TrialMarker(string deviceId) => $"device-trial:{deviceId}";
+    private static string FreeMarker(string deviceId) => $"device-free:{deviceId}";
+
+    /// <summary>The published trial or free plan the admin chose as the product's current offer, if any.</summary>
+    private Task<Plan?> CurrentOfferAsync(Guid tenantId, Guid productId, PlanKind kind, CancellationToken ct) =>
+        db.Plans.Where(p => p.TenantId == tenantId && p.ProductId == productId && p.Kind == kind && p.IsCurrent
+                && p.Status == PlanStatus.Published)
+            .OrderByDescending(p => p.Version).FirstOrDefaultAsync(ct);
+
+    /// <summary>
+    /// Gives a device the product's current free plan: one license per device and product, for one device. Asking again from
+    /// the same device returns <see cref="LicenseErrors.FreeUsed"/> (the device already has its free license key).
+    /// </summary>
+    public async Task<Result<FreePlanResponse>> StartFreeAsync(TrialRequest request, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var tenantId = caller.TenantId!.Value;
+        var deviceId = request.DeviceId?.Trim() ?? "";
+        if (!LicenseActivation.IsValidDeviceId(deviceId)) return LicenseErrors.InvalidDevice;
+
+        var productCode = request.ProductCode?.Trim() ?? "";
+        var product = productCode.Length == 0 ? null
+            : await db.Products.FirstOrDefaultAsync(p => p.TenantId == tenantId && p.Code == productCode && p.IsActive, ct);
+        var plan = product is null ? null : await CurrentOfferAsync(tenantId, product.Id, PlanKind.Free, ct);
+        if (product is null || plan is null) return LicenseErrors.FreeUnavailable;
+
+        var marker = FreeMarker(deviceId);
+        if (await db.Subscriptions.AnyAsync(s => s.TenantId == tenantId && s.ProductId == product.Id && s.Notes == marker, ct))
+            return LicenseErrors.FreeUsed;
+
+        var customer = await db.Customers.FirstOrDefaultAsync(c => c.TenantId == tenantId && c.Name == FreeCustomerName, ct);
+        if (customer is null)
+        {
+            customer = Customer.Create(tenantId, FreeCustomerName, null, null, null, null, now);
+            db.Customers.Add(customer);
+        }
+        else if (customer.Status != CustomerStatus.Active)
+        {
+            return LicenseErrors.FreeUnavailable;
+        }
+
+        var sub = Subscription.Start(tenantId, customer.Id, product.Id, plan.Id, now, plan.DurationDays, null, now, marker);
+        db.Subscriptions.Add(sub);
+        var (plainKey, hash, prefix) = keys.Generate();
+        var license = License.Issue(tenantId, customer.Id, sub.Id, product.Id, plan.Id, LicenseService.NewLicenseNumber(now),
+            hash, prefix, plan.ToEntitlements(product.Code) with { MaxActivations = 1 }, sub.EndDate, now);
+        db.Licenses.Add(license);
+        audit.Add("license.free_started", "License", license.Id.ToString(),
+            details: $"number={license.LicenseNumber} prefix={prefix} device={deviceId} plan={plan.Code}", tenantId: tenantId);
+        await db.SaveChangesAsync(ct);
+
+        if (!await db.TryReserveActivationSlotAsync(license.Id, ct))
+            return LicenseErrors.ActivationLimitReached;
+        db.LicenseActivations.Add(LicenseActivation.Create(license, deviceId, request.DeviceName, request.AppVersion, caller.IpAddress, now, request.Os));
+        db.ActivationAttempts.Add(ActivationAttempt.Record(tenantId, license, prefix, deviceId, null, caller.IpAddress, now));
+        await db.SaveChangesAsync(ct);
+
+        var snapshot = await LoadSnapshotAsync(license, ct);
+        var response = await RespondAsync(snapshot!, deviceId, now, alreadyActivated: false, ct);
+        return new FreePlanResponse(plainKey, response.Value, plan.Code, plan.DurationDays);
+    }
 
     public async Task<Result<LicenseCheckResponse>> ActivateAsync(ActivateRequest request, CancellationToken ct)
     {

@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Api } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
-import { Plan, SavePlan } from '../core/api.models';
+import { Plan, PlanKind, SavePlan } from '../core/api.models';
 import { I18n, LocalNumberPipe, TranslatePipe } from '../core/i18n.service';
 import { Toasts } from '../core/toast.service';
 import { Icon } from '../shared/icon';
@@ -34,17 +34,24 @@ import { Avatar } from '../shared/media';
           <option value="Published">{{ 'status.Published' | t }}</option>
           <option value="Archived">{{ 'status.Archived' | t }}</option>
         </select>
+        <select [ngModel]="kind()" (ngModelChange)="kind.set($event)" [attr.aria-label]="'plans.kind' | t">
+          <option value="">{{ 'plans.allKinds' | t }}</option>
+          @for (k of kinds; track k) { <option [value]="k">{{ 'kind.' + k | t }}</option> }
+        </select>
         @if (canManage() && product()) {
           <button class="btn btn-primary" type="button" (click)="newPlan()"><app-icon name="plus" [size]="16" />{{ 'plans.new' | t }}</button>
         }
       </div>
     </header>
 
+    @if (canManage()) { <p class="hint" style="margin:0 0 12px">{{ 'plans.currentHint' | t }}</p> }
     <app-state [loading]="plans.loading() && !plans.data()" [error]="plans.error()" [empty]="plans.data()?.total === 0" (retry)="plans.load()">
       <div class="pricing">
         @for (pl of ordered(); track pl.id) {
-          <article class="price-card" [class.popular]="pl.id === popularId()" [class.dim]="pl.status === 'Archived'">
-            @if (pl.id === popularId()) { <span class="ribbon">{{ 'plans.mostPopular' | t }}</span> }
+          <article class="price-card" [class.popular]="pl.id === popularId() || pl.isCurrent" [class.dim]="pl.status === 'Archived'">
+            @if (pl.isCurrent) { <span class="ribbon">{{ 'plans.current' | t }}</span> }
+            @else if (pl.id === popularId()) { <span class="ribbon">{{ 'plans.mostPopular' | t }}</span> }
+            <span class="badge" [class.info]="pl.kind === 'Trial'" [class.ok]="pl.kind === 'Free'" [class.neutral]="pl.kind === 'Paid'" style="align-self:flex-start">{{ 'kind.' + pl.kind | t }}</span>
             <h3>{{ pl.name }}</h3>
             <div class="amount" dir="ltr">
               @if (pl.price > 0) { {{ pl.price | num }} {{ pl.currency }} <small>{{ cycle(pl) }}</small> }
@@ -65,6 +72,13 @@ import { Avatar } from '../shared/media';
                 <button class="btn btn-primary" type="button" (click)="act(pl, 'publish')">{{ 'plans.publish' | t }}</button>
                 <button class="btn btn-ghost danger" type="button" (click)="remove(pl)">{{ 'plans.delete' | t }}</button>
               } @else if (pl.status === 'Published') {
+                @if (pl.kind !== 'Paid') {
+                  @if (pl.isCurrent) {
+                    <button class="btn btn-ghost" type="button" (click)="setCurrent(pl, false)">{{ 'plans.stopOffer' | t }}</button>
+                  } @else {
+                    <button class="btn btn-primary" type="button" (click)="setCurrent(pl, true)">{{ 'plans.makeCurrent' | t }}</button>
+                  }
+                }
                 <button class="btn" type="button" (click)="act(pl, 'version')">{{ 'plans.newVersion' | t }}</button>
                 <button class="btn btn-ghost" type="button" (click)="act(pl, 'archive')">{{ 'plans.archive' | t }}</button>
               }
@@ -76,14 +90,20 @@ import { Avatar } from '../shared/media';
 
     <app-modal [(open)]="planOpen" [title]="(editingPlan() ? 'common.edit' : 'plans.new') | t" wide>
       <form class="form" (ngSubmit)="savePlan()">
+        <label class="field"><span>{{ 'plans.kind' | t }}</span>
+          <select name="kind" [ngModel]="form.kind" (ngModelChange)="setKind($event)">
+            @for (k of kinds; track k) { <option [value]="k">{{ 'kind.' + k | t }}</option> }
+          </select>
+          <small class="muted">{{ 'plans.kindHint.' + form.kind | t }}</small>
+        </label>
         <div class="grid-2">
           <label class="field"><span>{{ 'common.code' | t }}</span><input name="code" dir="ltr" required [disabled]="!!editingPlan()" [(ngModel)]="form.code" /></label>
           <label class="field"><span>{{ 'common.name' | t }}</span><input name="name" required [(ngModel)]="form.name" /></label>
-          <label class="field"><span>{{ 'plans.price' | t }}</span><input name="price" type="number" min="0" step="0.01" required [(ngModel)]="form.price" /></label>
+          <label class="field"><span>{{ 'plans.price' | t }}</span><input name="price" type="number" min="0" step="0.01" required [disabled]="form.kind === 'Free'" [(ngModel)]="form.price" /></label>
           <label class="field"><span>{{ 'plans.currency' | t }}</span><input name="currency" dir="ltr" maxlength="3" required [(ngModel)]="form.currency" /></label>
           <label class="field"><span>{{ 'plans.duration' | t }}</span><input name="duration" type="number" min="1" [(ngModel)]="form.durationDays" />
             <small class="muted">{{ 'plans.durationHint' | t }}</small></label>
-          <label class="field"><span>{{ 'plans.trial' | t }}</span><input name="trial" type="number" min="0" max="90" [(ngModel)]="form.trialDays" /></label>
+          <label class="field"><span>{{ 'plans.trial' | t }}</span><input name="trial" type="number" min="0" max="90" [required]="form.kind === 'Trial'" [(ngModel)]="form.trialDays" /></label>
           <label class="field"><span>{{ 'plans.maxActivations' | t }}</span><input name="max" type="number" min="1" [(ngModel)]="form.maxActivations" />
             <small class="muted">{{ 'plans.maxHint' | t }}</small></label>
           <label class="field"><span>{{ 'plans.heartbeat' | t }}</span><input name="hb" type="number" min="1" max="720" required [(ngModel)]="form.heartbeatIntervalHours" /></label>
@@ -105,16 +125,23 @@ export class PlansPage {
 
   readonly products = loader(() => this.api.products({ pageSize: 200 }));
   readonly status = signal('');
+  readonly kind = signal('');
+  readonly kinds: PlanKind[] = ['Paid', 'Trial', 'Free'];
   readonly productId = signal<string>(this.route.snapshot.queryParamMap.get('product') ?? '');
   readonly product = computed(() => (this.products.data()?.items ?? []).find(p => p.id === this.productId()) ?? null);
   readonly plans = loader(() => this.api.plans({ productId: this.productId(), status: this.status(), pageSize: 200 }), false);
 
-  /** Cheapest first, archived last, like a public pricing page. */
-  readonly ordered = computed(() => [...(this.plans.data()?.items ?? [])]
-    .sort((a, b) => (a.status === 'Archived' ? 1 : 0) - (b.status === 'Archived' ? 1 : 0) || a.price - b.price));
-  /** The middle published plan carries the "Most Popular" ribbon. */
+  /** Trial and free offers first, then paid plans cheapest first; archived last, like a public pricing page. */
+  readonly ordered = computed(() => {
+    const rank: Record<PlanKind, number> = { Trial: 0, Free: 1, Paid: 2 };
+    return [...(this.plans.data()?.items ?? [])]
+      .filter(p => !this.kind() || p.kind === this.kind())
+      .sort((a, b) => (a.status === 'Archived' ? 1 : 0) - (b.status === 'Archived' ? 1 : 0)
+        || rank[a.kind ?? 'Paid'] - rank[b.kind ?? 'Paid'] || Number(b.isCurrent) - Number(a.isCurrent) || a.price - b.price);
+  });
+  /** The middle published paid plan carries the "Most Popular" ribbon. */
   readonly popularId = computed(() => {
-    const published = this.ordered().filter(p => p.status === 'Published');
+    const published = this.ordered().filter(p => p.status === 'Published' && p.kind === 'Paid');
     return published.length >= 3 ? published[Math.floor(published.length / 2)].id : null;
   });
 
@@ -142,7 +169,7 @@ export class PlansPage {
 
   private empty(productId: string): SavePlan {
     return { productId, code: '', name: '', price: 0, currency: 'EGP', durationDays: 30, trialDays: null, maxActivations: 1,
-      heartbeatIntervalHours: 24, offlineGraceDays: 7, features: [] };
+      heartbeatIntervalHours: 24, offlineGraceDays: 7, features: [], kind: 'Paid' };
   }
 
   newPlan() { this.editingPlan.set(null); this.form = this.empty(this.productId()); this.featuresText = ''; this.planOpen.set(true); }
@@ -151,7 +178,7 @@ export class PlansPage {
     this.editingPlan.set(pl);
     this.form = { productId: pl.productId, code: pl.code, name: pl.name, price: pl.price, currency: pl.currency,
       durationDays: pl.durationDays ?? null, trialDays: pl.trialDays ?? null, maxActivations: pl.maxActivations ?? null,
-      heartbeatIntervalHours: pl.heartbeatIntervalHours, offlineGraceDays: pl.offlineGraceDays, features: pl.features };
+      heartbeatIntervalHours: pl.heartbeatIntervalHours, offlineGraceDays: pl.offlineGraceDays, features: pl.features, kind: pl.kind ?? 'Paid' };
     this.featuresText = pl.features.join(', ');
     this.planOpen.set(true);
   }
@@ -170,6 +197,16 @@ export class PlansPage {
   act(pl: Plan, action: 'publish' | 'archive' | 'version') {
     const req = action === 'publish' ? this.api.publishPlan(pl.id) : action === 'archive' ? this.api.archivePlan(pl.id) : this.api.newPlanVersion(pl.id);
     req.subscribe(() => { this.ok(); this.plans.load(); });
+  }
+
+  setKind(kind: PlanKind) {
+    this.form.kind = kind;
+    if (kind === 'Free') { this.form.price = 0; this.form.trialDays = null; }
+    if (kind === 'Trial') { this.form.price = 0; this.form.trialDays ||= 14; }
+  }
+
+  setCurrent(pl: Plan, current: boolean) {
+    (current ? this.api.makePlanCurrent(pl.id) : this.api.clearPlanCurrent(pl.id)).subscribe(() => { this.ok(); this.plans.load(); });
   }
 
   remove(pl: Plan) {

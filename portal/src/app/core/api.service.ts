@@ -61,6 +61,8 @@ export class Api {
   publishPlan(id: string) { return this.http.post<Plan>(`${this.base}/plans/${id}/publish`, {}); }
   archivePlan(id: string) { return this.http.post<Plan>(`${this.base}/plans/${id}/archive`, {}); }
   deletePlan(id: string) { return this.http.delete<void>(`${this.base}/plans/${id}`); }
+  makePlanCurrent(id: string) { return this.http.post<Plan>(`${this.base}/plans/${id}/make-current`, {}); }
+  clearPlanCurrent(id: string) { return this.http.post<Plan>(`${this.base}/plans/${id}/clear-current`, {}); }
   newPlanVersion(id: string) { return this.http.post<Plan>(`${this.base}/plans/${id}/new-version`, {}); }
 
   // Subscriptions
