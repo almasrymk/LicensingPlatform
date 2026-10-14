@@ -558,3 +558,65 @@ public sealed class OutboxTests : IClassFixture<TestAppFixture>
         Assert.Equal(0, await _app.WithDbAsync(db => db.OutboxMessages.CountAsync(m => m.ProcessedAt == null && !m.DeadLettered)));
     }
 }
+
+public sealed class DeviceTrialTests : IClassFixture<TestAppFixture>
+{
+    private readonly TestApp _app;
+
+    public DeviceTrialTests(TestAppFixture f) => _app = f.App;
+
+    private Task<HttpClient> Device() => _app.ClientTokenAsync(DemoAccounts.NourClientId, DemoAccounts.NourClientSecret);
+
+    private async Task<string> ProductAsync(int? trialDays)
+    {
+        var admin = await _app.LoginAsync(DemoAccounts.NourAdmin);
+        var code = "T" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        var product = await (await admin.PostJsonAsync("/api/v1/products", new { code, name = "تجربة " + code })).OkJsonAsync(HttpStatusCode.Created);
+        var plan = await (await admin.PostJsonAsync("/api/v1/plans", new
+        {
+            productId = product.GetProperty("id").GetGuid(), code = "STD", name = "قياسي", price = 100, currency = "EGP",
+            durationDays = 365, trialDays, maxActivations = 3, heartbeatIntervalHours = 24, offlineGraceDays = 7, features = new[] { "reports" },
+        })).OkJsonAsync(HttpStatusCode.Created);
+        await (await admin.PostAsync($"/api/v1/plans/{plan.GetProperty("id").GetGuid()}/publish", null)).OkJsonAsync();
+        return code;
+    }
+
+    [Fact]
+    public async Task A_device_gets_one_trial_that_ends_with_the_trial_days_and_works_like_a_license()
+    {
+        var code = await ProductAsync(trialDays: 14);
+        var device = await Device();
+        var body = new { deviceId = "TRIAL-DEVICE-0001", deviceName = "جهاز تجربة", productCode = code };
+
+        var trial = await (await device.PostJsonAsync("/api/v1/licensing/trial", body)).OkJsonAsync();
+        var key = trial.GetProperty("productKey").GetString()!;
+        var license = trial.GetProperty("license");
+        Assert.Equal("active", license.GetProperty("status").GetString());
+        Assert.Equal(1, license.GetProperty("maxActivations").GetInt32());
+        Assert.False(string.IsNullOrEmpty(license.GetProperty("token").GetString()));
+        var ends = license.GetProperty("expiresAt").GetDateTimeOffset();
+        Assert.InRange(ends, _app.Clock.GetUtcNow().AddDays(14).AddMinutes(-1), _app.Clock.GetUtcNow().AddDays(14).AddMinutes(1));
+
+        var validated = await (await device.PostJsonAsync("/api/v1/licensing/validate", new { productKey = key, deviceId = "TRIAL-DEVICE-0001" })).OkJsonAsync();
+        Assert.Equal("active", validated.GetProperty("status").GetString());
+
+        var again = await device.PostJsonAsync("/api/v1/licensing/trial", body);
+        Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+        Assert.Equal("LIC_TRIAL_USED", await again.ErrorCodeAsync());
+
+        var stored = await _app.WithDbAsync(db => db.AuditRecords.AnyAsync(a => a.Details != null && a.Details.Contains(key)));
+        Assert.False(stored);
+    }
+
+    [Fact]
+    public async Task A_product_without_trial_days_has_no_trial()
+    {
+        var code = await ProductAsync(trialDays: null);
+        var device = await Device();
+
+        var response = await device.PostJsonAsync("/api/v1/licensing/trial", new { deviceId = "TRIAL-DEVICE-0002", productCode = code });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("LIC_TRIAL_UNAVAILABLE", await response.ErrorCodeAsync());
+    }
+}

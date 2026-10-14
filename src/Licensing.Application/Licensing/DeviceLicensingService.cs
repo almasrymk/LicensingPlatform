@@ -1,4 +1,5 @@
 using Licensing.Application.Abstractions;
+using Licensing.Domain.Catalog;
 using Licensing.Domain.Customers;
 using Licensing.Domain.Licensing;
 using Licensing.Domain.Subscriptions;
@@ -11,6 +12,10 @@ namespace Licensing.Application.Licensing;
 public sealed record ActivateRequest(string ProductKey, string DeviceId, string? DeviceName, string? ProductCode, string? AppVersion, string? Os = null);
 public sealed record ValidateRequest(string ProductKey, string DeviceId, string? ProductCode, string? AppVersion, string? Os = null);
 public sealed record DeactivateRequest(string ProductKey, string DeviceId);
+public sealed record TrialRequest(string DeviceId, string? DeviceName, string? ProductCode, string? AppVersion, string? Os = null);
+
+/// <summary>A device's trial: the product key (returned once, like an issued key) and the activation result.</summary>
+public sealed record TrialResponse(string ProductKey, LicenseCheckResponse License);
 
 /// <summary>Response of activate, validate and heartbeat. <c>Token</c> lets the client keep working offline until <c>OfflineValidUntil</c>.</summary>
 public sealed record LicenseCheckResponse(
@@ -40,6 +45,72 @@ public sealed class DeviceLicensingService(
     TimeProvider clock)
 {
     public static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
+
+    /// <summary>The customer that owns trial licenses started by devices themselves, one per tenant.</summary>
+    public const string TrialCustomerName = "Trial devices";
+
+    /// <summary>
+    /// Starts the one trial a device gets for a product: a subscription on the product's published plan with trial days, a
+    /// license for one device that ends with the trial, and this device's activation. A device that already had a trial
+    /// gets <see cref="LicenseErrors.TrialUsed"/>; the product key is returned only here, once.
+    /// </summary>
+    public async Task<Result<TrialResponse>> StartTrialAsync(TrialRequest request, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var tenantId = caller.TenantId!.Value;
+        var deviceId = request.DeviceId?.Trim() ?? "";
+        if (!LicenseActivation.IsValidDeviceId(deviceId)) return LicenseErrors.InvalidDevice;
+
+        var productCode = request.ProductCode?.Trim() ?? "";
+        var product = productCode.Length == 0 ? null
+            : await db.Products.FirstOrDefaultAsync(p => p.TenantId == tenantId && p.Code == productCode && p.IsActive, ct);
+        var plan = product is null ? null : await db.Plans
+            .Where(p => p.TenantId == tenantId && p.ProductId == product.Id && p.Status == PlanStatus.Published && p.TrialDays > 0)
+            .OrderBy(p => p.Code).FirstOrDefaultAsync(ct);
+        if (product is null || plan is null) return LicenseErrors.TrialUnavailable;
+
+        // The marker is kept on the subscription, so a device cannot start a second trial by reinstalling.
+        var marker = TrialMarker(deviceId);
+        if (await db.Subscriptions.AnyAsync(s => s.TenantId == tenantId && s.ProductId == product.Id && s.Notes == marker, ct))
+        {
+            audit.Add("license.trial_refused", "Product", product.Id.ToString(), false, $"device={deviceId}", tenantId);
+            await db.SaveChangesAsync(ct);
+            return LicenseErrors.TrialUsed;
+        }
+
+        var customer = await db.Customers.FirstOrDefaultAsync(c => c.TenantId == tenantId && c.Name == TrialCustomerName, ct);
+        if (customer is null)
+        {
+            customer = Customer.Create(tenantId, TrialCustomerName, null, null, null, null, now);
+            db.Customers.Add(customer);
+        }
+        else if (customer.Status != CustomerStatus.Active)
+        {
+            return LicenseErrors.TrialUnavailable;
+        }
+
+        var sub = Subscription.Start(tenantId, customer.Id, product.Id, plan.Id, now, plan.DurationDays, plan.TrialDays, now, marker);
+        db.Subscriptions.Add(sub);
+        var (plainKey, hash, prefix) = keys.Generate();
+        var license = License.Issue(tenantId, customer.Id, sub.Id, product.Id, plan.Id, LicenseService.NewLicenseNumber(now),
+            hash, prefix, plan.ToEntitlements(product.Code) with { MaxActivations = 1 }, sub.EndDate, now);
+        db.Licenses.Add(license);
+        audit.Add("license.trial_started", "License", license.Id.ToString(),
+            details: $"number={license.LicenseNumber} prefix={prefix} device={deviceId} ends={sub.EndDate:O}", tenantId: tenantId);
+        await db.SaveChangesAsync(ct);
+
+        if (!await db.TryReserveActivationSlotAsync(license.Id, ct))
+            return LicenseErrors.ActivationLimitReached;
+        db.LicenseActivations.Add(LicenseActivation.Create(license, deviceId, request.DeviceName, request.AppVersion, caller.IpAddress, now, request.Os));
+        db.ActivationAttempts.Add(ActivationAttempt.Record(tenantId, license, prefix, deviceId, null, caller.IpAddress, now));
+        await db.SaveChangesAsync(ct);
+
+        var snapshot = await LoadSnapshotAsync(license, ct);
+        var response = await RespondAsync(snapshot!, deviceId, now, alreadyActivated: false, ct);
+        return new TrialResponse(plainKey, response.Value);
+    }
+
+    private static string TrialMarker(string deviceId) => $"device-trial:{deviceId}";
 
     public async Task<Result<LicenseCheckResponse>> ActivateAsync(ActivateRequest request, CancellationToken ct)
     {
