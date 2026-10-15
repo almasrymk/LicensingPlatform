@@ -6,12 +6,6 @@
     <Project Path="src/Licensing.Infrastructure/Licensing.Infrastructure.csproj" />
     <Project Path="src/Licensing.SharedKernel/Licensing.SharedKernel.csproj" />
   </Folder>
-  <Folder Name="/src/BuildingBlocks/">
-    <Project Path="src/BuildingBlocks/Licensing.BuildingBlocks.Application/Licensing.BuildingBlocks.Application.csproj" />
-  </Folder>
-  <Folder Name="/src/Modules/Catalog/">
-    <Project Path="src/Modules/Catalog/Licensing.Modules.Catalog.Application/Licensing.Modules.Catalog.Application.csproj" />
-  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Licensing.Tests/Licensing.Tests.csproj" />
   </Folder>

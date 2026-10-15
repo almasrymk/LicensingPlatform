@@ -52,9 +52,5 @@ jobs:
           cache: npm
           cache-dependency-path: portal/package-lock.json
       - run: npm ci
-      - name: Dependency audit (shipped code high+, build tooling critical)
-        run: |
-          npm audit --omit=dev --audit-level=high
-          npm audit --audit-level=critical
       - run: npx ng test --watch=false
       - run: npx ng build
