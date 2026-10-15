@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The Catalog module's use cases as commands and queries (ADR-014). Until the module gets its own DbContext
+    (ADR-015 step 3) it reads and writes through the shared IAppDbContext, limited to Products and Plans;
+    the architecture tests fail the build if it touches another module's entities.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\BuildingBlocks\Licensing.BuildingBlocks.Application\Licensing.BuildingBlocks.Application.csproj" />
+    <ProjectReference Include="..\..\..\Licensing.Application\Licensing.Application.csproj" />
+  </ItemGroup>
+</Project>
