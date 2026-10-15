@@ -2,6 +2,8 @@ using Licensing.Application.Abstractions;
 using Licensing.Infrastructure.Identity;
 using Licensing.Infrastructure.Jobs;
 using Licensing.Infrastructure.Messaging;
+using Licensing.Infrastructure.ModuleAdapters;
+using Licensing.Modules.Catalog.Application;
 using Licensing.Infrastructure.Persistence;
 using Licensing.Infrastructure.Security;
 using Licensing.Infrastructure.Services;
@@ -43,6 +45,9 @@ public static class DependencyInjection
                 options.UseSqlServer(connectionString, sql => sql.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"));
         });
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
+
+        // ---- Module adapters: what a module needs from other modules (ADR-015) ----
+        services.AddScoped<ICatalogUsageReader, CatalogUsageReader>();
 
         // ---- Request context ----
         services.AddScoped<ICurrentUser, HttpCurrentUser>();

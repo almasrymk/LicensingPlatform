@@ -5,6 +5,7 @@ using Licensing.Application;
 using Licensing.Infrastructure;
 using Licensing.Infrastructure.Persistence;
 using Licensing.Infrastructure.Security;
+using Licensing.Modules.Catalog.Application;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -25,6 +26,7 @@ builder.Host.UseSerilog((ctx, services, log) => log
         outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u3}] {RequestPath} {Message:lj}{NewLine}{Exception}"));
 
 builder.Services.AddApplication();
+builder.Services.AddCatalogModule();
 builder.Services.AddInfrastructure(builder.Configuration);
 
 builder.Services.AddControllers(o => o.Filters.Add<ValidationFilter>())

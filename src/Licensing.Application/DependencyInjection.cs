@@ -1,6 +1,5 @@
 using FluentValidation;
 using Licensing.Application.Audit;
-using Licensing.Application.Catalog;
 using Licensing.Application.Customers;
 using Licensing.Application.Events;
 using Licensing.Application.Identity;
@@ -23,7 +22,6 @@ public static class DependencyInjection
         services.AddScoped<UserService>();
         services.AddScoped<TenantService>();
         services.AddScoped<CustomerService>();
-        services.AddScoped<CatalogService>();
         services.AddScoped<SubscriptionService>();
         services.AddScoped<LicenseService>();
         services.AddScoped<DeviceLicensingService>();
