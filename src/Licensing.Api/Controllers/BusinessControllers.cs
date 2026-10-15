@@ -1,6 +1,6 @@
 using Licensing.Api.Infrastructure;
 using Licensing.Application.Abstractions;
-using Licensing.BuildingBlocks.Application;
+using Licensing.Application.Catalog;
 using Licensing.Application.Common;
 using Licensing.Application.Integrations;
 using Licensing.Application.Licensing;
@@ -10,9 +10,6 @@ using Licensing.Domain.Catalog;
 using Licensing.Domain.Identity;
 using Licensing.Domain.Licensing;
 using Licensing.Domain.Subscriptions;
-using Licensing.Modules.Catalog.Application;
-using Licensing.Modules.Catalog.Application.Plans;
-using Licensing.Modules.Catalog.Application.Products;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -21,85 +18,81 @@ namespace Licensing.Api.Controllers;
 [ApiController]
 [Route("api/v1/products")]
 [Tags("Catalog")]
-public sealed class ProductsController(IDispatcher dispatcher) : ControllerBase
+public sealed class ProductsController(CatalogService catalog) : ControllerBase
 {
     [HttpGet]
     [HasPermission(Permissions.CatalogRead)]
-    public Task<PagedResult<ProductDto>> List([FromQuery] PageQuery page, CancellationToken ct) =>
-        dispatcher.QueryAsync(new ListProductsQuery(page), ct);
+    public Task<PagedResult<ProductDto>> List([FromQuery] PageQuery page, CancellationToken ct) => catalog.ListProductsAsync(page, ct);
 
     [HttpGet("{id:guid}")]
     [HasPermission(Permissions.CatalogRead)]
-    public async Task<IActionResult> Get(Guid id, CancellationToken ct) => this.ToActionResult(await dispatcher.QueryAsync(new GetProductQuery(id), ct));
+    public async Task<IActionResult> Get(Guid id, CancellationToken ct) => this.ToActionResult(await catalog.GetProductAsync(id, ct));
 
     [HttpPost]
     [HasPermission(Permissions.CatalogManage)]
     public async Task<IActionResult> Create(SaveProductRequest request, CancellationToken ct) =>
-        this.ToCreated(await dispatcher.SendAsync(new CreateProductCommand(request), ct), p => p.Id);
+        this.ToCreated(await catalog.CreateProductAsync(request, ct), p => p.Id);
 
     [HttpPut("{id:guid}")]
     [HasPermission(Permissions.CatalogManage)]
     public async Task<IActionResult> Update(Guid id, SaveProductRequest request, CancellationToken ct) =>
-        this.ToActionResult(await dispatcher.SendAsync(new UpdateProductCommand(id, request), ct));
+        this.ToActionResult(await catalog.UpdateProductAsync(id, request, ct));
 }
 
 [ApiController]
 [Route("api/v1/plans")]
 [Tags("Catalog")]
-public sealed class PlansController(IDispatcher dispatcher) : ControllerBase
+public sealed class PlansController(CatalogService catalog) : ControllerBase
 {
     [HttpGet]
     [HasPermission(Permissions.CatalogRead)]
     public Task<PagedResult<PlanDto>> List([FromQuery] PageQuery page, [FromQuery] Guid? productId, [FromQuery] PlanStatus? status, CancellationToken ct) =>
-        dispatcher.QueryAsync(new ListPlansQuery(page, productId, status), ct);
+        catalog.ListPlansAsync(page, productId, status, ct);
 
     [HttpGet("{id:guid}")]
     [HasPermission(Permissions.CatalogRead)]
-    public async Task<IActionResult> Get(Guid id, CancellationToken ct) => this.ToActionResult(await dispatcher.QueryAsync(new GetPlanQuery(id), ct));
+    public async Task<IActionResult> Get(Guid id, CancellationToken ct) => this.ToActionResult(await catalog.GetPlanAsync(id, ct));
 
     /// <summary>The plan as machine-readable entitlements (what a license issued from it grants).</summary>
     [HttpGet("{id:guid}/entitlements")]
     [HasPermission(Permissions.CatalogRead)]
-    public async Task<IActionResult> Entitlements(Guid id, CancellationToken ct) =>
-        this.ToActionResult(await dispatcher.QueryAsync(new GetPlanEntitlementsQuery(id), ct));
+    public async Task<IActionResult> Entitlements(Guid id, CancellationToken ct) => this.ToActionResult(await catalog.GetEntitlementsAsync(id, ct));
 
     [HttpPost]
     [HasPermission(Permissions.CatalogManage)]
     public async Task<IActionResult> Create(SavePlanRequest request, CancellationToken ct) =>
-        this.ToCreated(await dispatcher.SendAsync(new CreatePlanCommand(request), ct), p => p.Id);
+        this.ToCreated(await catalog.CreatePlanAsync(request, ct), p => p.Id);
 
     [HttpPut("{id:guid}")]
     [HasPermission(Permissions.CatalogManage)]
     public async Task<IActionResult> Update(Guid id, SavePlanRequest request, CancellationToken ct) =>
-        this.ToActionResult(await dispatcher.SendAsync(new UpdatePlanCommand(id, request), ct));
+        this.ToActionResult(await catalog.UpdatePlanAsync(id, request, ct));
 
     [HttpPost("{id:guid}/publish")]
     [HasPermission(Permissions.CatalogManage)]
-    public async Task<IActionResult> Publish(Guid id, CancellationToken ct) => this.ToActionResult(await dispatcher.SendAsync(new PublishPlanCommand(id), ct));
+    public async Task<IActionResult> Publish(Guid id, CancellationToken ct) => this.ToActionResult(await catalog.PublishPlanAsync(id, ct));
 
     [HttpPost("{id:guid}/archive")]
     [HasPermission(Permissions.CatalogManage)]
-    public async Task<IActionResult> Archive(Guid id, CancellationToken ct) => this.ToActionResult(await dispatcher.SendAsync(new ArchivePlanCommand(id), ct));
+    public async Task<IActionResult> Archive(Guid id, CancellationToken ct) => this.ToActionResult(await catalog.ArchivePlanAsync(id, ct));
 
     [HttpDelete("{id:guid}")]
     [HasPermission(Permissions.CatalogManage)]
-    public async Task<IActionResult> Delete(Guid id, CancellationToken ct) => this.ToActionResult(await dispatcher.SendAsync(new DeletePlanCommand(id), ct));
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct) => this.ToActionResult(await catalog.DeletePlanAsync(id, ct));
 
     /// <summary>Makes a published trial or free plan the one currently offered for its product.</summary>
     [HttpPost("{id:guid}/make-current")]
     [HasPermission(Permissions.CatalogManage)]
-    public async Task<IActionResult> MakeCurrent(Guid id, CancellationToken ct) =>
-        this.ToActionResult(await dispatcher.SendAsync(new SetCurrentPlanCommand(id), ct));
+    public async Task<IActionResult> MakeCurrent(Guid id, CancellationToken ct) => this.ToActionResult(await catalog.SetCurrentPlanAsync(id, ct));
 
     [HttpPost("{id:guid}/clear-current")]
     [HasPermission(Permissions.CatalogManage)]
-    public async Task<IActionResult> ClearCurrent(Guid id, CancellationToken ct) =>
-        this.ToActionResult(await dispatcher.SendAsync(new ClearCurrentPlanCommand(id), ct));
+    public async Task<IActionResult> ClearCurrent(Guid id, CancellationToken ct) => this.ToActionResult(await catalog.ClearCurrentPlanAsync(id, ct));
 
     [HttpPost("{id:guid}/new-version")]
     [HasPermission(Permissions.CatalogManage)]
     public async Task<IActionResult> NewVersion(Guid id, CancellationToken ct) =>
-        this.ToCreated(await dispatcher.SendAsync(new CreatePlanVersionCommand(id), ct), p => p.Id);
+        this.ToCreated(await catalog.NewPlanVersionAsync(id, ct), p => p.Id);
 }
 
 [ApiController]

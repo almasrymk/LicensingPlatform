@@ -80,13 +80,11 @@ dotnet run --project tools/Licensing.ReferenceAgent -- activate --key AMLPOS-DEM
 ```
 src/
   Licensing.SharedKernel     Entity, AggregateRoot, ValueObject, Result, DomainEvent
-  BuildingBlocks/            CQRS داخلي: ICommand/IQuery، IDispatcher، Logging وValidation behaviors (ADR-014)
-  Modules/Catalog/           موديول المنتجات والخطط (commands/queries عبر الـ dispatcher) (ADR-015)
   Licensing.Domain           Tenants, Identity, Customers, Catalog, Subscriptions, Licensing, Integrations, Audit, Reporting
   Licensing.Application      خدمات كل موديول (commands/queries)، الـ validators، event handlers
   Licensing.Infrastructure   EF Core (SQL Server)، العزل، Outbox/Inbox، Idempotency، التشفير والتوقيع، الـ Jobs، البيانات التجريبية
   Licensing.Api              Controllers، المصادقة والصلاحيات، ProblemDetails، Rate limiting، Health
-tests/Licensing.Tests        اختبارات Unit وArchitecture وAPI وعقد OpenAPI
+tests/Licensing.Tests        اختبارات Unit وArchitecture وAPI
 tests/load                   سكريبت k6 للحمل
 tools/Licensing.ReferenceAgent  العميل المرجعي
 portal/                      واجهة Angular

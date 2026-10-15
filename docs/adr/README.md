@@ -44,9 +44,3 @@
 
 ## ADR-013 — حالات Subscription وLicense
 **القرار:** Subscription: `Trial → Active`، `Renew` (Trial/Active/Expired)، `ChangePlan` (Trial/Active)، `Suspend`/`Resume`، `Cancel` (نهائي)، `Expire` (job). License: `Active ↔ Suspended`، `Revoked` (نهائي)، `Expired` (بانتهاء تاريخها أو بانتهاء/إلغاء الاشتراك، وترجع عند التجديد). فترة السماح offline = `HeartbeatInterval + OfflineGraceDays`.
-
-## ADR-014 — CQRS بدون مكتبة خارجية
-**القرار:** dispatcher داخلي في `Licensing.BuildingBlocks.Application` (`ICommand<T>`/`IQuery<T>` + handlers + `IPipelineBehavior`) بدل MediatR (أصبحت برخصة تجارية). الـ pipeline: Logging (الأبعد) ثم Validation. الـ validation ترجع `Result` بـ `VALIDATION_FAILED` لو نوع النتيجة `Result`، وإلا ترمي `ValidationException`. الـ handlers في الموديولات `internal`، والـ controllers تمر دائماً عبر `IDispatcher`. اختبار معماري يضمن handler واحد بالظبط لكل command/query.
-
-## ADR-015 — الـ Modular Monolith وخطوات النقل
-**القرار:** كل موديول تحت `src/Modules/<Name>/`، ويتنقل موديول واحد في كل PR بدون أي تغيير في سلوك الـ API (يحرسه اختبار snapshot لـ OpenAPI). Catalog أولاً: الـ Application بتاعه انفصل، ولسه بيستخدم `IAppDbContext` المشترك و`Licensing.Domain.Catalog` مؤقتاً؛ الـ DbContext والـ domain project الخاصين بيه في خطوة لاحقة. أي قراءة عبر الموديولات تمر عبر port (مثل `ICatalogUsageReader`) يتنفذ في Infrastructure على نفس الـ scoped context عشان فلاتر الـ tenant/العميل تفضل شغالة. اختبارات معمارية تمنع الموديولات من الاعتماد على Infrastructure/Api أو على كيانات موديولات تانية.
