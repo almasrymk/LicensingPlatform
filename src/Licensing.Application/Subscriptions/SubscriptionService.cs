@@ -20,7 +20,8 @@ public sealed record SubscriptionDetailsDto(SubscriptionDto Subscription, IReadO
 public sealed record SubscriptionFilter(Guid? CustomerId = null, SubscriptionStatus? Status = null, Guid? ProductId = null, Guid? PlanId = null,
     Guid? TenantId = null, DateTimeOffset? EndFrom = null, DateTimeOffset? EndTo = null);
 
-public sealed record StartSubscriptionRequest(Guid CustomerId, Guid PlanId, DateTimeOffset? StartDate, string? Notes);
+/// <summary><c>StartTrial</c> starts the subscription as a trial for the product's trial days.</summary>
+public sealed record StartSubscriptionRequest(Guid CustomerId, Guid PlanId, DateTimeOffset? StartDate, string? Notes, bool StartTrial = false);
 public sealed record RenewSubscriptionRequest(int? DurationDays, int? ExpectedVersion);
 public sealed record ChangePlanRequest(Guid PlanId, int? ExpectedVersion);
 public sealed record SubscriptionActionRequest(string? Reason, int? ExpectedVersion);
@@ -90,9 +91,17 @@ public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, IL
         if (plan.Status != PlanStatus.Published)
             return Error.Conflict("PLAN_NOT_PUBLISHED", "Only published plans can be subscribed to.");
 
+        int? trialDays = null;
+        if (request.StartTrial)
+        {
+            trialDays = await db.Products.Where(p => p.Id == plan.ProductId).Select(p => p.TrialDays).FirstOrDefaultAsync(ct);
+            if (trialDays is null)
+                return Error.Conflict("PRODUCT_NO_TRIAL", "This product has no trial days set.");
+        }
+
         var now = clock.GetUtcNow();
         var sub = Subscription.Start(customer.TenantId, customer.Id, plan.ProductId, plan.Id, request.StartDate ?? now,
-            plan.DurationDays, plan.TrialDays, now, request.Notes);
+            plan.DurationDays, trialDays, now, request.Notes);
         db.Subscriptions.Add(sub);
         audit.Add("subscription.started", "Subscription", sub.Id.ToString(), details: $"plan={plan.Code} v{plan.Version}", tenantId: sub.TenantId);
         await db.SaveChangesAsync(ct);

@@ -139,9 +139,6 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<int?>("TrialDays")
-                        .HasColumnType("int");
-
                     b.Property<int>("Version")
                         .HasColumnType("int");
 
@@ -197,6 +194,9 @@ namespace Licensing.Infrastructure.Persistence.Migrations
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("TrialDays")
+                        .HasColumnType("int");
 
                     b.HasKey("Id");
 

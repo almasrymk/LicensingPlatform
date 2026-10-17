@@ -21,6 +21,16 @@ public sealed class Product : AggregateRoot, ITenantOwned
 
     public void SetImage(Guid? imageId) => ImageId = imageId;
 
+    /// <summary>How long a trial of this product lasts. Null means the product offers no trial.</summary>
+    public int? TrialDays { get; private set; }
+
+    public void SetTrialDays(int? trialDays)
+    {
+        if (trialDays is < 0 or > 90)
+            throw new DomainException(Error.Validation("VALIDATION_FAILED", "Trial days must be between 0 and 90."));
+        TrialDays = trialDays is 0 ? null : trialDays;
+    }
+
     /// <summary>Built-in icon name used when no image is uploaded (e.g. "cube", "server", "shield").</summary>
     public string? Icon { get; private set; }
 
@@ -74,8 +84,8 @@ public sealed class Product : AggregateRoot, ITenantOwned
 
 public enum PlanStatus { Draft = 1, Published = 2, Archived = 3 }
 
-/// <summary>Paid plans are sold; a trial plan is what devices get when they start a trial; a free plan is offered to everyone.</summary>
-public enum PlanKind { Paid = 1, Trial = 2, Free = 3 }
+/// <summary>Paid plans are sold; a free plan is offered to everyone. Trials are a product setting (<see cref="Product.TrialDays"/>).</summary>
+public enum PlanKind { Paid = 1, Free = 3 }
 
 /// <summary>What a plan grants, in a form client software can read.</summary>
 public sealed record Entitlements(
@@ -105,7 +115,6 @@ public sealed class Plan : AggregateRoot, ITenantOwned
     public Money Price { get; private set; }
     /// <summary>Null means lifetime.</summary>
     public int? DurationDays { get; private set; }
-    public int? TrialDays { get; private set; }
     /// <summary>Null means unlimited.</summary>
     public int? MaxActivations { get; private set; }
     public int HeartbeatIntervalHours { get; private set; }
@@ -115,7 +124,7 @@ public sealed class Plan : AggregateRoot, ITenantOwned
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? PublishedAt { get; private set; }
     public PlanKind Kind { get; private set; } = PlanKind.Paid;
-    /// <summary>The trial or free plan currently offered for the product. At most one per product and kind.</summary>
+    /// <summary>The free plan currently offered for the product. At most one per product.</summary>
     public bool IsCurrent { get; private set; }
 
     public IReadOnlyList<string> Features =>
@@ -125,7 +134,7 @@ public sealed class Plan : AggregateRoot, ITenantOwned
     public bool IsLifetime => DurationDays is null;
 
     public static Plan Create(
-        Guid tenantId, Guid productId, string code, string name, Money price, int? durationDays, int? trialDays,
+        Guid tenantId, Guid productId, string code, string name, Money price, int? durationDays,
         int? maxActivations, int heartbeatIntervalHours, int offlineGraceDays, IEnumerable<string> features, DateTimeOffset now,
         PlanKind kind = PlanKind.Paid)
     {
@@ -139,26 +148,24 @@ public sealed class Plan : AggregateRoot, ITenantOwned
             CreatedAt = now,
         };
         plan.Kind = kind;
-        plan.Apply(name, price, durationDays, trialDays, maxActivations, heartbeatIntervalHours, offlineGraceDays, features);
+        plan.Apply(name, price, durationDays, maxActivations, heartbeatIntervalHours, offlineGraceDays, features);
         return plan;
     }
 
-    public void Update(string name, Money price, int? durationDays, int? trialDays, int? maxActivations,
+    public void Update(string name, Money price, int? durationDays, int? maxActivations,
         int heartbeatIntervalHours, int offlineGraceDays, IEnumerable<string> features, PlanKind? kind = null)
     {
         if (Status != PlanStatus.Draft)
             throw new DomainException(Error.Conflict("PLAN_NOT_DRAFT", "Only draft plans can be edited. Create a new version instead."));
         if (kind is { } k) Kind = k;
-        Apply(name, price, durationDays, trialDays, maxActivations, heartbeatIntervalHours, offlineGraceDays, features);
+        Apply(name, price, durationDays, maxActivations, heartbeatIntervalHours, offlineGraceDays, features);
     }
 
-    private void Apply(string name, Money price, int? durationDays, int? trialDays, int? maxActivations,
+    private void Apply(string name, Money price, int? durationDays, int? maxActivations,
         int heartbeatIntervalHours, int offlineGraceDays, IEnumerable<string> features)
     {
         if (durationDays is < 1)
             throw new DomainException(Error.Validation("VALIDATION_FAILED", "Duration must be at least one day (or empty for lifetime)."));
-        if (trialDays is < 0 or > 90)
-            throw new DomainException(Error.Validation("VALIDATION_FAILED", "Trial days must be between 0 and 90."));
         if (heartbeatIntervalHours is < 1 or > 24 * 30)
             throw new DomainException(Error.Validation("VALIDATION_FAILED", "Heartbeat interval must be between 1 hour and 30 days."));
         if (offlineGraceDays is < 0 or > 365)
@@ -167,7 +174,6 @@ public sealed class Plan : AggregateRoot, ITenantOwned
         Name = Guard.NotEmpty(name, "Name");
         Price = price;
         DurationDays = durationDays;
-        TrialDays = trialDays is 0 ? null : trialDays;
         MaxActivations = PlanLimit.From(maxActivations).Value;
         HeartbeatIntervalHours = heartbeatIntervalHours;
         OfflineGraceDays = offlineGraceDays;
@@ -175,17 +181,15 @@ public sealed class Plan : AggregateRoot, ITenantOwned
 
         if (!Enum.IsDefined(Kind))
             throw new DomainException(Error.Validation("VALIDATION_FAILED", "Unknown plan type."));
-        if (Kind == PlanKind.Trial && TrialDays is null)
-            throw new DomainException(Error.Validation("PLAN_TRIAL_DAYS_REQUIRED", "A trial plan needs its number of trial days."));
         if (Kind == PlanKind.Free && Price.Amount != 0)
             throw new DomainException(Error.Validation("PLAN_FREE_PRICE", "A free plan must have a price of 0."));
     }
 
-    /// <summary>Makes this the trial or free plan offered for its product. The caller clears the previous one.</summary>
+    /// <summary>Makes this the free plan offered for its product. The caller clears the previous one.</summary>
     public void MakeCurrent()
     {
-        if (Kind == PlanKind.Paid)
-            throw new DomainException(Error.Conflict("PLAN_NOT_OFFER", "Only trial and free plans can be made the current offer."));
+        if (Kind != PlanKind.Free)
+            throw new DomainException(Error.Conflict("PLAN_NOT_OFFER", "Only free plans can be made the current offer."));
         if (Status != PlanStatus.Published)
             throw new DomainException(Error.Conflict("PLAN_OFFER_NOT_PUBLISHED", "Publish the plan before making it the current offer."));
         IsCurrent = true;
@@ -214,7 +218,7 @@ public sealed class Plan : AggregateRoot, ITenantOwned
     public Plan NewVersion(int nextVersion, DateTimeOffset now)
     {
         // Value objects are copied, never shared between aggregates.
-        var draft = Create(TenantId, ProductId, Code, Name, new Money(Price.Amount, Price.Currency), DurationDays, TrialDays, MaxActivations,
+        var draft = Create(TenantId, ProductId, Code, Name, new Money(Price.Amount, Price.Currency), DurationDays, MaxActivations,
             HeartbeatIntervalHours, OfflineGraceDays, Features, now, Kind);
         draft.Version = nextVersion;
         return draft;

@@ -559,7 +559,7 @@ public sealed class OutboxTests : IClassFixture<TestAppFixture>
     }
 }
 
-/// <summary>Plan types: several trial and free plans per product, one of each marked as the current offer.</summary>
+/// <summary>Plan types: paid and free plans, one free plan per product marked as the current offer. Trials are a product setting.</summary>
 public sealed class PlanKindTests : IClassFixture<TestAppFixture>
 {
     private readonly TestApp _app;
@@ -567,23 +567,24 @@ public sealed class PlanKindTests : IClassFixture<TestAppFixture>
 
     private Task<HttpClient> Device() => _app.ClientTokenAsync(DemoAccounts.NourClientId, DemoAccounts.NourClientSecret);
 
-    private static async Task<Guid> PlanAsync(HttpClient admin, Guid productId, string code, string kind, decimal price, int? trialDays, int? durationDays, bool publish = true)
+    private static async Task<Guid> PlanAsync(HttpClient admin, Guid productId, string code, string kind, decimal price, int? durationDays,
+        string[]? features = null, bool publish = true)
     {
         var plan = await (await admin.PostJsonAsync("/api/v1/plans", new
         {
-            productId, code, name = code, price, currency = "EGP", durationDays, trialDays, maxActivations = 1,
-            heartbeatIntervalHours = 24, offlineGraceDays = 7, features = Array.Empty<string>(), kind,
+            productId, code, name = code, price, currency = "EGP", durationDays, maxActivations = 1,
+            heartbeatIntervalHours = 24, offlineGraceDays = 7, features = features ?? [], kind,
         })).OkJsonAsync(HttpStatusCode.Created);
         var id = plan.GetProperty("id").GetGuid();
         if (publish) await (await admin.PostAsync($"/api/v1/plans/{id}/publish", null)).OkJsonAsync();
         return id;
     }
 
-    private async Task<(HttpClient Admin, Guid ProductId, string Code)> ProductAsync()
+    private async Task<(HttpClient Admin, Guid ProductId, string Code)> ProductAsync(int? trialDays = null)
     {
         var admin = await _app.LoginAsync(DemoAccounts.NourAdmin);
         var code = "K" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
-        var product = await (await admin.PostJsonAsync("/api/v1/products", new { code, name = "أنواع " + code })).OkJsonAsync(HttpStatusCode.Created);
+        var product = await (await admin.PostJsonAsync("/api/v1/products", new { code, name = "أنواع " + code, trialDays })).OkJsonAsync(HttpStatusCode.Created);
         return (admin, product.GetProperty("id").GetGuid(), code);
     }
 
@@ -591,43 +592,67 @@ public sealed class PlanKindTests : IClassFixture<TestAppFixture>
     public async Task Plan_type_rules_are_enforced()
     {
         var (admin, productId, _) = await ProductAsync();
-        var trialWithoutDays = await admin.PostJsonAsync("/api/v1/plans", new
+        var trialPlan = await admin.PostJsonAsync("/api/v1/plans", new
         {
-            productId, code = "T0", name = "t", price = 0, currency = "EGP", durationDays = 30, trialDays = (int?)null, maxActivations = 1,
+            productId, code = "T0", name = "t", price = 0, currency = "EGP", durationDays = 30, maxActivations = 1,
             heartbeatIntervalHours = 24, offlineGraceDays = 7, features = Array.Empty<string>(), kind = "Trial",
         });
-        Assert.Equal("PLAN_TRIAL_DAYS_REQUIRED", await trialWithoutDays.ErrorCodeAsync());
+        Assert.Equal(HttpStatusCode.BadRequest, trialPlan.StatusCode);
 
         var paidFree = await admin.PostJsonAsync("/api/v1/plans", new
         {
-            productId, code = "F0", name = "f", price = 50, currency = "EGP", durationDays = (int?)null, trialDays = (int?)null, maxActivations = 1,
+            productId, code = "F0", name = "f", price = 50, currency = "EGP", durationDays = (int?)null, maxActivations = 1,
             heartbeatIntervalHours = 24, offlineGraceDays = 7, features = Array.Empty<string>(), kind = "Free",
         });
         Assert.Equal("PLAN_FREE_PRICE", await paidFree.ErrorCodeAsync());
 
-        var paid = await PlanAsync(admin, productId, "P1", "Paid", 100, null, 365);
+        var paid = await PlanAsync(admin, productId, "P1", "Paid", 100, 365);
         var cannot = await admin.PostAsync($"/api/v1/plans/{paid}/make-current", null);
         Assert.Equal("PLAN_NOT_OFFER", await cannot.ErrorCodeAsync());
     }
 
     [Fact]
-    public async Task Only_one_trial_plan_is_current_and_device_trials_use_it()
+    public async Task Device_trials_take_their_days_from_the_product_and_unlock_the_fullest_paid_plan()
     {
-        var (admin, productId, code) = await ProductAsync();
-        var trial7 = await PlanAsync(admin, productId, "TRIAL7", "Trial", 0, 7, 30);
-        var trial30 = await PlanAsync(admin, productId, "TRIAL30", "Trial", 0, 30, 30);
+        var (admin, productId, code) = await ProductAsync(trialDays: 30);
+        await PlanAsync(admin, productId, "A-BASIC", "Paid", 100, 30, ["reports"]);
+        await PlanAsync(admin, productId, "Z-PRO", "Paid", 300, 30, ["reports", "export"]);
+        await PlanAsync(admin, productId, "FREE", "Free", 0, null, ["reports", "export", "api"]);
 
-        await (await admin.PostAsync($"/api/v1/plans/{trial7}/make-current", null)).OkJsonAsync();
-        var current = await (await admin.PostAsync($"/api/v1/plans/{trial30}/make-current", null)).OkJsonAsync();
-        Assert.True(current.GetProperty("isCurrent").GetBoolean());
-        Assert.Equal("Trial", current.GetProperty("kind").GetString());
-        Assert.False((await (await admin.GetAsync($"/api/v1/plans/{trial7}")).OkJsonAsync()).GetProperty("isCurrent").GetBoolean());
-
-        // TRIAL7 sorts first by code, but TRIAL30 is the current trial plan.
         var device = await Device();
         var trial = await (await device.PostJsonAsync("/api/v1/licensing/trial", new { deviceId = "KIND-TRIAL-0001", productCode = code })).OkJsonAsync();
         Assert.Equal(30, trial.GetProperty("trialDays").GetInt32());
-        Assert.Equal("TRIAL30", trial.GetProperty("license").GetProperty("planCode").GetString());
+        Assert.Equal("Z-PRO", trial.GetProperty("license").GetProperty("planCode").GetString());
+
+        // Changing the product's trial days changes the next trial.
+        await (await admin.PutJsonAsync($"/api/v1/products/{productId}", new { code, name = "أنواع " + code, isActive = true, trialDays = 7 })).OkJsonAsync();
+        var next = await (await device.PostJsonAsync("/api/v1/licensing/trial", new { deviceId = "KIND-TRIAL-0002", productCode = code })).OkJsonAsync();
+        Assert.Equal(7, next.GetProperty("trialDays").GetInt32());
+    }
+
+    [Fact]
+    public async Task Admin_subscriptions_start_as_a_trial_only_when_asked_and_use_the_product_trial_days()
+    {
+        var (admin, productId, _) = await ProductAsync(trialDays: 10);
+        var plan = await PlanAsync(admin, productId, "STD", "Paid", 100, 365);
+        var customer = await (await admin.PostJsonAsync("/api/v1/customers", new { name = "عميل تجربة " + Guid.NewGuid().ToString("N")[..6] }))
+            .OkJsonAsync(HttpStatusCode.Created);
+        var customerId = customer.GetProperty("customer").GetProperty("id").GetGuid();
+
+        var paid = await (await admin.PostJsonAsync("/api/v1/subscriptions", new { customerId, planId = plan })).OkJsonAsync(HttpStatusCode.Created);
+        Assert.Equal("Active", paid.GetProperty("subscription").GetProperty("status").GetString());
+
+        var trial = await (await admin.PostJsonAsync("/api/v1/subscriptions", new { customerId, planId = plan, startTrial = true }))
+            .OkJsonAsync(HttpStatusCode.Created);
+        var sub = trial.GetProperty("subscription");
+        Assert.Equal("Trial", sub.GetProperty("status").GetString());
+        var ends = sub.GetProperty("trialEndsAt").GetDateTimeOffset();
+        Assert.InRange(ends, _app.Clock.GetUtcNow().AddDays(10).AddMinutes(-1), _app.Clock.GetUtcNow().AddDays(10).AddMinutes(1));
+
+        var (admin2, noTrialProduct, _) = await ProductAsync();
+        var plan2 = await PlanAsync(admin2, noTrialProduct, "STD", "Paid", 100, 365);
+        var refused = await admin2.PostJsonAsync("/api/v1/subscriptions", new { customerId, planId = plan2, startTrial = true });
+        Assert.Equal("PRODUCT_NO_TRIAL", await refused.ErrorCodeAsync());
     }
 
     [Fact]
@@ -638,8 +663,8 @@ public sealed class PlanKindTests : IClassFixture<TestAppFixture>
         var none = await device.PostJsonAsync("/api/v1/licensing/free", new { deviceId = "KIND-FREE-0001", productCode = code });
         Assert.Equal("LIC_FREE_UNAVAILABLE", await none.ErrorCodeAsync());
 
-        await PlanAsync(admin, productId, "FREEOLD", "Free", 0, null, null);
-        var free = await PlanAsync(admin, productId, "FREE", "Free", 0, null, null);
+        await PlanAsync(admin, productId, "FREEOLD", "Free", 0, null);
+        var free = await PlanAsync(admin, productId, "FREE", "Free", 0, null);
         await (await admin.PostAsync($"/api/v1/plans/{free}/make-current", null)).OkJsonAsync();
 
         var body = new { deviceId = "KIND-FREE-0001", productCode = code };
@@ -667,11 +692,11 @@ public sealed class DeviceTrialTests : IClassFixture<TestAppFixture>
     {
         var admin = await _app.LoginAsync(DemoAccounts.NourAdmin);
         var code = "T" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
-        var product = await (await admin.PostJsonAsync("/api/v1/products", new { code, name = "تجربة " + code })).OkJsonAsync(HttpStatusCode.Created);
+        var product = await (await admin.PostJsonAsync("/api/v1/products", new { code, name = "تجربة " + code, trialDays })).OkJsonAsync(HttpStatusCode.Created);
         var plan = await (await admin.PostJsonAsync("/api/v1/plans", new
         {
             productId = product.GetProperty("id").GetGuid(), code = "STD", name = "قياسي", price = 100, currency = "EGP",
-            durationDays = 365, trialDays, maxActivations = 3, heartbeatIntervalHours = 24, offlineGraceDays = 7, features = new[] { "reports" },
+            durationDays = 365, maxActivations = 3, heartbeatIntervalHours = 24, offlineGraceDays = 7, features = new[] { "reports" },
         })).OkJsonAsync(HttpStatusCode.Created);
         await (await admin.PostAsync($"/api/v1/plans/{plan.GetProperty("id").GetGuid()}/publish", null)).OkJsonAsync();
         return code;

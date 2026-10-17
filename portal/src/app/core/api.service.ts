@@ -50,8 +50,8 @@ export class Api {
 
   // Catalog
   products(q?: Query) { return this.http.get<Paged<Product>>(`${this.base}/products`, { params: params(q) }); }
-  createProduct(body: { code: string; name: string; description?: string; tenantId?: string; platforms?: string[]; icon?: string | null }) { return this.http.post<Product>(`${this.base}/products`, body); }
-  updateProduct(id: string, body: { code: string; name: string; description?: string; isActive: boolean; platforms?: string[]; icon?: string | null }) {
+  createProduct(body: { code: string; name: string; description?: string; tenantId?: string; platforms?: string[]; icon?: string | null; trialDays?: number | null }) { return this.http.post<Product>(`${this.base}/products`, body); }
+  updateProduct(id: string, body: { code: string; name: string; description?: string; isActive: boolean; platforms?: string[]; icon?: string | null; trialDays?: number | null }) {
     return this.http.put<Product>(`${this.base}/products/${id}`, body);
   }
   plans(q?: Query) { return this.http.get<Paged<Plan>>(`${this.base}/plans`, { params: params(q) }); }
@@ -68,7 +68,7 @@ export class Api {
   // Subscriptions
   subscriptions(q?: Query) { return this.http.get<Paged<Subscription>>(`${this.base}/subscriptions`, { params: params(q) }); }
   subscription(id: string) { return this.http.get<SubscriptionDetails>(`${this.base}/subscriptions/${id}`); }
-  startSubscription(body: { customerId: string; planId: string; startDate?: string; notes?: string }) {
+  startSubscription(body: { customerId: string; planId: string; startDate?: string; notes?: string; startTrial?: boolean }) {
     return this.http.post<SubscriptionDetails>(`${this.base}/subscriptions`, body);
   }
   subscriptionAction(id: string, action: 'renew' | 'suspend' | 'resume' | 'cancel' | 'change-plan', body: object) {

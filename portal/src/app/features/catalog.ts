@@ -61,7 +61,7 @@ import { Avatar, ImageUpload, Lookups } from '../shared/media';
                 }
               </div>
             </div>
-            <div class="platform-chips">@for (pl of p.platforms; track pl) { <span>{{ pl }}</span> }</div>
+            <div class="platform-chips">@for (pl of p.platforms; track pl) { <span>{{ pl }}</span> }@if (p.trialDays) { <span>{{ 'plans.trialN' | t: { n: p.trialDays } }}</span> }</div>
             <div class="pcard-stats">
               <div><small>{{ 'nav.plans' | t }}</small><b>{{ p.plans | num }}</b></div>
               <div><small>{{ 'col.licenses' | t }}</small><b>{{ p.licenses | num }}</b></div>
@@ -77,6 +77,7 @@ import { Avatar, ImageUpload, Lookups } from '../shared/media';
         <label class="field"><span>{{ 'common.code' | t }}</span><input name="code" dir="ltr" required [disabled]="!!editingProduct()" [(ngModel)]="pForm.code" /></label>
         <label class="field"><span>{{ 'common.name' | t }}</span><input name="name" required [(ngModel)]="pForm.name" /></label>
         <label class="field"><span>{{ 'common.description' | t }}</span><textarea name="desc" rows="3" [(ngModel)]="pForm.description"></textarea></label>
+        <label class="field"><span>{{ 'products.trialDays' | t }}</span><input name="trialDays" type="number" min="0" max="90" [(ngModel)]="pForm.trialDays" /><small class="muted">{{ 'products.trialHint' | t }}</small></label>
         <fieldset class="field">
           <legend>{{ 'img.icon' | t }}</legend>
           <div class="icon-grid">
@@ -133,7 +134,7 @@ export class CatalogPage {
 
   readonly productOpen = signal(false);
   readonly editingProduct = signal<Product | null>(null);
-  pForm = { code: '', name: '', description: '', isActive: true, platforms: [] as string[], icon: 'cube' as string | null };
+  pForm = { code: '', name: '', description: '', isActive: true, platforms: [] as string[], icon: 'cube' as string | null, trialDays: null as number | null };
 
   @HostListener('document:click') closeMenus() { this.menuFor.set(null); }
   toggleMenu(id: string, e: Event) { e.stopPropagation(); this.menuFor.set(this.menuFor() === id ? null : id); }
@@ -145,22 +146,24 @@ export class CatalogPage {
 
   private ok() { this.toasts.success(this.i18n.t('common.saved')); }
 
-  newProduct() { this.editingProduct.set(null); this.pForm = { code: '', name: '', description: '', isActive: true, platforms: ['Windows'], icon: 'cube' }; this.productOpen.set(true); }
+  newProduct() { this.editingProduct.set(null); this.pForm = { code: '', name: '', description: '', isActive: true, platforms: ['Windows'], icon: 'cube', trialDays: null }; this.productOpen.set(true); }
 
   editProduct(p: Product) {
     this.editingProduct.set(p);
-    this.pForm = { code: p.code, name: p.name, description: p.description ?? '', isActive: p.isActive, platforms: [...p.platforms], icon: p.icon ?? 'cube' };
+    this.pForm = { code: p.code, name: p.name, description: p.description ?? '', isActive: p.isActive, platforms: [...p.platforms], icon: p.icon ?? 'cube', trialDays: p.trialDays ?? null };
     this.productOpen.set(true);
   }
 
   toggleActive(p: Product) {
-    this.api.updateProduct(p.id, { code: p.code, name: p.name, description: p.description, isActive: !p.isActive, platforms: p.platforms, icon: p.icon })
+    this.api.updateProduct(p.id, { code: p.code, name: p.name, description: p.description, isActive: !p.isActive, platforms: p.platforms, icon: p.icon, trialDays: p.trialDays ?? null })
       .subscribe(() => { this.ok(); this.products.load(); });
   }
 
   saveProduct() {
     const e = this.editingProduct();
-    const req = e ? this.api.updateProduct(e.id, this.pForm) : this.api.createProduct(this.pForm);
+    const t = this.pForm.trialDays as unknown;
+    const body = { ...this.pForm, trialDays: t === '' || t === null || t === undefined ? null : Number(t) };
+    const req = e ? this.api.updateProduct(e.id, body) : this.api.createProduct(body);
     req.subscribe(() => { this.ok(); this.productOpen.set(false); this.products.load(); this.lookups.invalidate(); });
   }
 }

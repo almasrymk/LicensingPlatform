@@ -111,7 +111,7 @@ public class SubscriptionStateMachineTests
 
 public class CatalogTests
 {
-    private static Plan NewPlan() => Plan.Create(Guid.NewGuid(), Guid.NewGuid(), "pro", "Pro", new Money(10, "usd"), 365, null, 5, 24, 7,
+    private static Plan NewPlan() => Plan.Create(Guid.NewGuid(), Guid.NewGuid(), "pro", "Pro", new Money(10, "usd"), 365, 5, 24, 7,
         ["Reports", "inventory", "inventory"], DateTimeOffset.UtcNow);
 
     [Fact]
@@ -128,7 +128,7 @@ public class CatalogTests
     {
         var plan = NewPlan();
         plan.Publish(DateTimeOffset.UtcNow);
-        var ex = Assert.Throws<DomainException>(() => plan.Update("x", new Money(1, "USD"), 1, null, 1, 1, 1, []));
+        var ex = Assert.Throws<DomainException>(() => plan.Update("x", new Money(1, "USD"), 1, 1, 1, 1, []));
         Assert.Equal("PLAN_NOT_DRAFT", ex.Error.Code);
 
         var v2 = plan.NewVersion(2, DateTimeOffset.UtcNow);

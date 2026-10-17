@@ -8,21 +8,21 @@ using Microsoft.EntityFrameworkCore;
 namespace Licensing.Application.Catalog;
 
 public sealed record ProductDto(Guid Id, Guid TenantId, string Code, string Name, string? Description, bool IsActive, DateTimeOffset CreatedAt,
-    int PublishedPlans, int Plans, int Licenses, IReadOnlyList<string> Platforms, string? Icon, Guid? ImageId)
+    int PublishedPlans, int Plans, int Licenses, IReadOnlyList<string> Platforms, string? Icon, Guid? ImageId, int? TrialDays = null)
 {
     public string ImageUrl => Media.MediaService.UrlFor(ImageId);
 }
 public sealed record SaveProductRequest(string Code, string Name, string? Description, bool IsActive = true, Guid? TenantId = null,
-    IReadOnlyList<string>? Platforms = null, string? Icon = null);
+    IReadOnlyList<string>? Platforms = null, string? Icon = null, int? TrialDays = null);
 
 public sealed record PlanDto(
     Guid Id, Guid TenantId, Guid ProductId, string ProductCode, string ProductName, string Code, string Name, int Version,
-    PlanStatus Status, decimal Price, string Currency, int? DurationDays, int? TrialDays, int? MaxActivations,
+    PlanStatus Status, decimal Price, string Currency, int? DurationDays, int? MaxActivations,
     int HeartbeatIntervalHours, int OfflineGraceDays, IReadOnlyList<string> Features, DateTimeOffset CreatedAt, DateTimeOffset? PublishedAt,
     PlanKind Kind = PlanKind.Paid, bool IsCurrent = false);
 
 public sealed record SavePlanRequest(
-    Guid ProductId, string Code, string Name, decimal Price, string Currency, int? DurationDays, int? TrialDays,
+    Guid ProductId, string Code, string Name, decimal Price, string Currency, int? DurationDays,
     int? MaxActivations, int HeartbeatIntervalHours, int OfflineGraceDays, IReadOnlyList<string>? Features, PlanKind Kind = PlanKind.Paid);
 
 public sealed class CatalogService(IAppDbContext db, ICurrentUser me, ITenantContext scope, IAuditLogger audit, TimeProvider clock)
@@ -36,7 +36,7 @@ public sealed class CatalogService(IAppDbContext db, ICurrentUser me, ITenantCon
         db.Plans.Count(pl => pl.ProductId == p.Id && pl.Status != PlanStatus.Archived),
         db.Licenses.Count(l => l.ProductId == p.Id),
         p.PlatformsValue == "" ? new List<string>() : p.PlatformsValue.Split(';', StringSplitOptions.RemoveEmptyEntries).ToList(),
-        p.Icon, p.ImageId));
+        p.Icon, p.ImageId, p.TrialDays));
 
     public Task<PagedResult<ProductDto>> ListProductsAsync(PageQuery page, CancellationToken ct)
     {
@@ -58,6 +58,7 @@ public sealed class CatalogService(IAppDbContext db, ICurrentUser me, ITenantCon
         if (tenant.IsFailure) return tenant.Error!;
         var product = Product.Create(tenant.Value, request.Code, request.Name, request.Description, clock.GetUtcNow(), request.Platforms);
         product.SetIcon(request.Icon);
+        product.SetTrialDays(request.TrialDays);
         if (await db.Products.IgnoreQueryFilters().AnyAsync(p => p.TenantId == tenant.Value && p.Code == product.Code, ct))
             return AppErrors.Duplicate("A product with this code");
         db.Products.Add(product);
@@ -72,6 +73,7 @@ public sealed class CatalogService(IAppDbContext db, ICurrentUser me, ITenantCon
         if (product is null) return AppErrors.NotFound("Product");
         product.Update(request.Name, request.Description, request.IsActive, request.Platforms);
         if (request.Icon is not null) product.SetIcon(request.Icon == "" ? null : request.Icon);
+        product.SetTrialDays(request.TrialDays);
         audit.Add("product.updated", "Product", id.ToString(), tenantId: product.TenantId);
         await db.SaveChangesAsync(ct);
         return await GetProductAsync(id, ct);
@@ -115,7 +117,7 @@ public sealed class CatalogService(IAppDbContext db, ICurrentUser me, ITenantCon
             return AppErrors.Duplicate("A plan with this code (use 'new version' to change a published plan)");
 
         var plan = Plan.Create(product.TenantId, product.Id, request.Code!, request.Name, new Money(request.Price, request.Currency),
-            request.DurationDays, request.TrialDays, request.MaxActivations, request.HeartbeatIntervalHours,
+            request.DurationDays, request.MaxActivations, request.HeartbeatIntervalHours,
             request.OfflineGraceDays, request.Features ?? [], clock.GetUtcNow(), request.Kind);
         db.Plans.Add(plan);
         audit.Add("plan.created", "Plan", plan.Id.ToString(), tenantId: plan.TenantId);
@@ -127,7 +129,7 @@ public sealed class CatalogService(IAppDbContext db, ICurrentUser me, ITenantCon
     {
         var plan = await db.Plans.FirstOrDefaultAsync(p => p.Id == id, ct);
         if (plan is null) return AppErrors.NotFound("Plan");
-        plan.Update(request.Name, new Money(request.Price, request.Currency), request.DurationDays, request.TrialDays,
+        plan.Update(request.Name, new Money(request.Price, request.Currency), request.DurationDays,
             request.MaxActivations, request.HeartbeatIntervalHours, request.OfflineGraceDays, request.Features ?? [], request.Kind);
         audit.Add("plan.updated", "Plan", id.ToString(), tenantId: plan.TenantId);
         await db.SaveChangesAsync(ct);
@@ -139,8 +141,8 @@ public sealed class CatalogService(IAppDbContext db, ICurrentUser me, ITenantCon
         var plan = await db.Plans.FirstOrDefaultAsync(p => p.Id == id, ct);
         if (plan is null) return AppErrors.NotFound("Plan");
         plan.Publish(clock.GetUtcNow());
-        // A new version of the current trial/free plan takes over as the current offer.
-        if (plan.Kind != PlanKind.Paid && await db.Plans.AnyAsync(p => p.ProductId == plan.ProductId && p.Code == plan.Code && p.Id != plan.Id && p.IsCurrent, ct))
+        // A new version of the current free plan takes over as the current offer.
+        if (plan.Kind == PlanKind.Free && await db.Plans.AnyAsync(p => p.ProductId == plan.ProductId && p.Code == plan.Code && p.Id != plan.Id && p.IsCurrent, ct))
             await MakeCurrentAsync(plan, ct);
         audit.Add("plan.published", "Plan", id.ToString(), details: $"{plan.Code} v{plan.Version}", tenantId: plan.TenantId);
         await db.SaveChangesAsync(ct);
@@ -157,7 +159,7 @@ public sealed class CatalogService(IAppDbContext db, ICurrentUser me, ITenantCon
         return await GetPlanAsync(id, ct);
     }
 
-    /// <summary>Makes a published trial or free plan the one currently offered for its product (replacing the previous one).</summary>
+    /// <summary>Makes a published free plan the one currently offered for its product (replacing the previous one).</summary>
     public async Task<Result<PlanDto>> SetCurrentPlanAsync(Guid id, CancellationToken ct)
     {
         var plan = await db.Plans.FirstOrDefaultAsync(p => p.Id == id, ct);
@@ -168,7 +170,7 @@ public sealed class CatalogService(IAppDbContext db, ICurrentUser me, ITenantCon
         return await GetPlanAsync(id, ct);
     }
 
-    /// <summary>Stops offering a trial or free plan; devices then get no trial / free plan for the product until another is chosen.</summary>
+    /// <summary>Stops offering a free plan; devices then get no free plan for the product until another is chosen.</summary>
     public async Task<Result<PlanDto>> ClearCurrentPlanAsync(Guid id, CancellationToken ct)
     {
         var plan = await db.Plans.FirstOrDefaultAsync(p => p.Id == id, ct);
@@ -225,6 +227,6 @@ public sealed class CatalogService(IAppDbContext db, ICurrentUser me, ITenantCon
 
     private static PlanDto ToDto(Plan pl, string productCode, string productName) => new(
         pl.Id, pl.TenantId, pl.ProductId, productCode, productName, pl.Code, pl.Name, pl.Version, pl.Status,
-        pl.Price.Amount, pl.Price.Currency, pl.DurationDays, pl.TrialDays, pl.MaxActivations, pl.HeartbeatIntervalHours,
+        pl.Price.Amount, pl.Price.Currency, pl.DurationDays, pl.MaxActivations, pl.HeartbeatIntervalHours,
         pl.OfflineGraceDays, pl.Features, pl.CreatedAt, pl.PublishedAt, pl.Kind, pl.IsCurrent);
 }

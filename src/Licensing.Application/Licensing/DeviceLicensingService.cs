@@ -54,10 +54,10 @@ public sealed class DeviceLicensingService(
     public const string FreeCustomerName = "Free plan devices";
 
     /// <summary>
-    /// Starts the one trial a device gets for a product: a subscription on the product's current trial plan (or, when no
-    /// trial plan was chosen, the first published plan with trial days, by code), a
-    /// license for one device that ends with the trial, and this device's activation. A device that already had a trial
-    /// gets <see cref="LicenseErrors.TrialUsed"/>; the product key is returned only here, once.
+    /// Starts the one trial a device gets for a product. The trial length is the product's <see cref="Product.TrialDays"/>;
+    /// the trial unlocks the product's fullest published paid plan (most features, then highest price). It creates a
+    /// subscription, a license for one device that ends with the trial, and this device's activation. A device that already
+    /// had a trial gets <see cref="LicenseErrors.TrialUsed"/>; the product key is returned only here, once.
     /// </summary>
     public async Task<Result<TrialResponse>> StartTrialAsync(TrialRequest request, CancellationToken ct)
     {
@@ -69,11 +69,14 @@ public sealed class DeviceLicensingService(
         var productCode = request.ProductCode?.Trim() ?? "";
         var product = productCode.Length == 0 ? null
             : await db.Products.FirstOrDefaultAsync(p => p.TenantId == tenantId && p.Code == productCode && p.IsActive, ct);
-        var plan = product is null ? null : await CurrentOfferAsync(tenantId, product.Id, PlanKind.Trial, ct) ?? await db.Plans
-            .Where(p => p.TenantId == tenantId && p.ProductId == product.Id && p.Status == PlanStatus.Published && p.TrialDays > 0
-                && p.Kind != PlanKind.Free)
-            .OrderBy(p => p.Code).FirstOrDefaultAsync(ct);
-        if (product is null || plan is null || plan.TrialDays is null) return LicenseErrors.TrialUnavailable;
+        if (product?.TrialDays is not { } trialDays) return LicenseErrors.TrialUnavailable;
+        // Feature lists are not translatable to SQL, so the (few) published paid plans are ranked in memory.
+        var plan = (await db.Plans
+                .Where(p => p.TenantId == tenantId && p.ProductId == product.Id && p.Status == PlanStatus.Published && p.Kind == PlanKind.Paid)
+                .ToListAsync(ct))
+            .OrderByDescending(p => p.Features.Count).ThenByDescending(p => p.Price.Amount).ThenBy(p => p.Code).ThenByDescending(p => p.Version)
+            .FirstOrDefault();
+        if (plan is null) return LicenseErrors.TrialUnavailable;
 
         // The marker is kept on the subscription, so a device cannot start a second trial by reinstalling.
         var marker = TrialMarker(deviceId);
@@ -95,7 +98,7 @@ public sealed class DeviceLicensingService(
             return LicenseErrors.TrialUnavailable;
         }
 
-        var sub = Subscription.Start(tenantId, customer.Id, product.Id, plan.Id, now, plan.DurationDays, plan.TrialDays, now, marker);
+        var sub = Subscription.Start(tenantId, customer.Id, product.Id, plan.Id, now, plan.DurationDays, trialDays, now, marker);
         db.Subscriptions.Add(sub);
         var (plainKey, hash, prefix) = keys.Generate();
         var license = License.Issue(tenantId, customer.Id, sub.Id, product.Id, plan.Id, LicenseService.NewLicenseNumber(now),
@@ -113,13 +116,13 @@ public sealed class DeviceLicensingService(
 
         var snapshot = await LoadSnapshotAsync(license, ct);
         var response = await RespondAsync(snapshot!, deviceId, now, alreadyActivated: false, ct);
-        return new TrialResponse(plainKey, response.Value, plan.TrialDays!.Value);
+        return new TrialResponse(plainKey, response.Value, trialDays);
     }
 
     private static string TrialMarker(string deviceId) => $"device-trial:{deviceId}";
     private static string FreeMarker(string deviceId) => $"device-free:{deviceId}";
 
-    /// <summary>The published trial or free plan the admin chose as the product's current offer, if any.</summary>
+    /// <summary>The published free plan the admin chose as the product's current offer, if any.</summary>
     private Task<Plan?> CurrentOfferAsync(Guid tenantId, Guid productId, PlanKind kind, CancellationToken ct) =>
         db.Plans.Where(p => p.TenantId == tenantId && p.ProductId == productId && p.Kind == kind && p.IsCurrent
                 && p.Status == PlanStatus.Published)

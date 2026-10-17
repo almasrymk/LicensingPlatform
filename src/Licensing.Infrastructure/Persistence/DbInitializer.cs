@@ -145,19 +145,20 @@ public sealed class DbInitializer(
         var accounting = Product.Create(nour.Id, "ACCOUNTING", "نظام المحاسبة", "برنامج محاسبة متكامل للشركات", now.AddDays(-390), DemoPlatforms["ACCOUNTING"]);
         var pos = Product.Create(nour.Id, "POS", "نقطة البيع", "برنامج كاشير ونقاط بيع", now.AddDays(-380), DemoPlatforms["POS"]);
         var school = Product.Create(ofoq.Id, "SCHOOL", "نظام إدارة المدارس", "إدارة الطلاب والدرجات والحضور", now.AddDays(-190), DemoPlatforms["SCHOOL"]);
+        pos.SetTrialDays(14);
         db.Products.AddRange(accounting, pos, school);
 
-        var accBasic = Plan.Create(nour.Id, accounting.Id, "BASIC", "الأساسية - سنوي", new Money(1200, "EGP"), 365, null, 2, 24, 7,
+        var accBasic = Plan.Create(nour.Id, accounting.Id, "BASIC", "الأساسية - سنوي", new Money(1200, "EGP"), 365, 2, 24, 7,
             ["invoices", "reports.basic"], now.AddDays(-390));
-        var accPro = Plan.Create(nour.Id, accounting.Id, "PRO", "الاحترافية - سنوي", new Money(3500, "EGP"), 365, null, 5, 24, 14,
+        var accPro = Plan.Create(nour.Id, accounting.Id, "PRO", "الاحترافية - سنوي", new Money(3500, "EGP"), 365, 5, 24, 14,
             ["invoices", "reports.basic", "reports.advanced", "inventory", "multi-branch"], now.AddDays(-390));
-        var accLifetime = Plan.Create(nour.Id, accounting.Id, "LIFETIME", "مدى الحياة", new Money(15000, "EGP"), null, null, 1, 72, 30,
+        var accLifetime = Plan.Create(nour.Id, accounting.Id, "LIFETIME", "مدى الحياة", new Money(15000, "EGP"), null, 1, 72, 30,
             ["invoices", "reports.basic", "reports.advanced"], now.AddDays(-390));
-        var posMonthly = Plan.Create(nour.Id, pos.Id, "MONTHLY", "نقطة البيع - شهري", new Money(300, "EGP"), 30, 14, 3, 12, 3,
+        var posMonthly = Plan.Create(nour.Id, pos.Id, "MONTHLY", "نقطة البيع - شهري", new Money(300, "EGP"), 30, 3, 12, 3,
             ["sales", "barcode", "receipts"], now.AddDays(-380));
-        var accDraft = Plan.Create(nour.Id, accounting.Id, "ENTERPRISE", "المؤسسات (مسودة)", new Money(9000, "EGP"), 365, null, null, 24, 14,
+        var accDraft = Plan.Create(nour.Id, accounting.Id, "ENTERPRISE", "المؤسسات (مسودة)", new Money(9000, "EGP"), 365, null, 24, 14,
             ["invoices", "reports.basic", "reports.advanced", "inventory", "multi-branch", "api"], now.AddDays(-5));
-        var schoolYear = Plan.Create(ofoq.Id, school.Id, "YEAR", "سنة دراسية", new Money(5000, "EGP"), 300, null, 10, 24, 10,
+        var schoolYear = Plan.Create(ofoq.Id, school.Id, "YEAR", "سنة دراسية", new Money(5000, "EGP"), 300, 10, 24, 10,
             ["students", "grades", "attendance"], now.AddDays(-190));
         foreach (var p in new[] { accBasic, accPro, accLifetime, posMonthly, schoolYear }) p.Publish(now.AddDays(-370));
         db.Plans.AddRange(accBasic, accPro, accLifetime, posMonthly, accDraft, schoolYear);
@@ -244,7 +245,8 @@ public sealed class DbInitializer(
         await db.SaveChangesAsync(ct);
 
         Subscription Sub(Customer c, Plan p, DateTimeOffset start, bool trial = false) =>
-            Subscription.Start(c.TenantId, c.Id, p.ProductId, p.Id, start, p.DurationDays, trial ? p.TrialDays : null, start);
+            Subscription.Start(c.TenantId, c.Id, p.ProductId, p.Id, start, p.DurationDays,
+                trial ? new[] { accounting, pos, school }.First(x => x.Id == p.ProductId).TrialDays : null, start);
 
         License Lic(Subscription s, Plan p, Product product, string? plainKey, DateTimeOffset issuedAt)
         {

@@ -68,7 +68,7 @@ public sealed class LicensingController(DeviceLicensingService licensing, IIdemp
         this.ToActionResult(await licensing.HeartbeatAsync(request, ct));
 
     /// <summary>
-    /// Starts this device's one trial of a product, on the product's published plan with trial days. The product key is in the
+    /// Starts this device's one trial of a product, for the product's trial days. The product key is in the
     /// response only this once; a device that already had a trial gets <c>LIC_TRIAL_USED</c>.
     /// </summary>
     [HttpPost("trial")]

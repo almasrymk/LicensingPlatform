@@ -43,19 +43,21 @@ export interface CustomerDetails { customer: Customer; contacts: Contact[]; }
 export interface Product {
   id: string; tenantId: string; code: string; name: string; description?: string; isActive: boolean; createdAt: string; publishedPlans: number;
   plans: number; licenses: number; platforms: string[]; icon?: string | null; imageUrl?: string;
+  /** Trial length for this product; null means no trial. */
+  trialDays?: number | null;
 }
 
 export type PlanStatus = 'Draft' | 'Published' | 'Archived';
-export type PlanKind = 'Paid' | 'Trial' | 'Free';
+export type PlanKind = 'Paid' | 'Free';
 export interface Plan {
   id: string; tenantId: string; productId: string; productCode: string; productName: string; code: string; name: string;
-  version: number; status: PlanStatus; price: number; currency: string; durationDays?: number | null; trialDays?: number | null;
+  version: number; status: PlanStatus; price: number; currency: string; durationDays?: number | null;
   maxActivations?: number | null; heartbeatIntervalHours: number; offlineGraceDays: number; features: string[];
   createdAt: string; publishedAt?: string; kind: PlanKind; isCurrent: boolean;
 }
 export interface SavePlan {
   productId: string; code: string; name: string; price: number; currency: string; durationDays: number | null;
-  trialDays: number | null; maxActivations: number | null; heartbeatIntervalHours: number; offlineGraceDays: number; features: string[];
+  maxActivations: number | null; heartbeatIntervalHours: number; offlineGraceDays: number; features: string[];
   kind: PlanKind;
 }
 

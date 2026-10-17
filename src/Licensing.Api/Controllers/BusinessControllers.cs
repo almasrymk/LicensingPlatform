@@ -80,7 +80,7 @@ public sealed class PlansController(CatalogService catalog) : ControllerBase
     [HasPermission(Permissions.CatalogManage)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct) => this.ToActionResult(await catalog.DeletePlanAsync(id, ct));
 
-    /// <summary>Makes a published trial or free plan the one currently offered for its product.</summary>
+    /// <summary>Makes a published free plan the one currently offered for its product.</summary>
     [HttpPost("{id:guid}/make-current")]
     [HasPermission(Permissions.CatalogManage)]
     public async Task<IActionResult> MakeCurrent(Guid id, CancellationToken ct) => this.ToActionResult(await catalog.SetCurrentPlanAsync(id, ct));

@@ -93,6 +93,7 @@ import { lookupSignals } from '../shared/media';
         </label>
         <label class="field"><span>{{ 'subs.start' | t }} <small class="muted">({{ 'common.optional' | t }})</small></span>
           <input name="start" type="date" [(ngModel)]="form.startDate" /></label>
+        <label class="check"><input type="checkbox" name="startTrial" [(ngModel)]="form.startTrial" /> {{ 'subs.startTrial' | t }}</label>
         <label class="field"><span>{{ 'subs.notes' | t }}</span><textarea name="notes" rows="2" [(ngModel)]="form.notes"></textarea></label>
         <div class="form-actions"><button class="btn btn-primary" type="submit" [disabled]="!form.customerId || !form.planId">{{ 'common.save' | t }}</button></div>
       </form>
@@ -128,7 +129,7 @@ export class SubscriptionsPage implements OnInit {
   readonly open = signal(false);
   readonly customers = signal<Customer[]>([]);
   readonly plans = signal<Plan[]>([]);
-  form = { customerId: '', planId: '', startDate: '', notes: '' };
+  form = { customerId: '', planId: '', startDate: '', notes: '', startTrial: false };
 
   clear() {
     this.search.set(''); this.status.set(''); this.productId.set(''); this.planId.set(''); this.tenantId.set('');
@@ -144,7 +145,7 @@ export class SubscriptionsPage implements OnInit {
   }
 
   openNew(customerId = '') {
-    this.form = { customerId, planId: '', startDate: '', notes: '' };
+    this.form = { customerId, planId: '', startDate: '', notes: '', startTrial: false };
     this.api.customers({ pageSize: 200, status: 'Active' }).subscribe(r => this.customers.set(r.items));
     this.api.plans({ pageSize: 200, status: 'Published' }).subscribe(r => this.plans.set(r.items));
     this.open.set(true);
@@ -153,7 +154,7 @@ export class SubscriptionsPage implements OnInit {
   create() {
     this.api.startSubscription({
       customerId: this.form.customerId, planId: this.form.planId,
-      startDate: this.form.startDate ? new Date(this.form.startDate).toISOString() : undefined, notes: this.form.notes || undefined,
+      startDate: this.form.startDate ? new Date(this.form.startDate).toISOString() : undefined, notes: this.form.notes || undefined, startTrial: this.form.startTrial,
     }).subscribe(r => {
       this.toasts.success(this.i18n.t('common.saved'));
       this.open.set(false);
