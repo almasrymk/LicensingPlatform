@@ -45,6 +45,8 @@ public static class DependencyInjection
                 options.UseSqlServer(connectionString, sql => sql.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"));
         });
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
+        services.Configure<Messaging.ChangeFeedOptions>(config.GetSection(Messaging.ChangeFeedOptions.Section));
+        services.AddScoped<global::Licensing.Application.Integrations.IChangeFeed, Messaging.ChangeFeedReader>();
 
         // ---- Module adapters: what a module needs from other modules (ADR-015) ----
         services.AddScoped<ICatalogUsageReader, CatalogUsageReader>();

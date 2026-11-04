@@ -1024,6 +1024,8 @@ namespace Licensing.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ProcessedAt", "DeadLettered", "NextAttemptAt");
 
+                    b.HasIndex("TenantId", "OccurredAt", "Id");
+
                     b.ToTable("OutboxMessages", "messaging");
                 });
 

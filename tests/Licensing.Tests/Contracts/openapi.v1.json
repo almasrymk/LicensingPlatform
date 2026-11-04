@@ -3396,6 +3396,41 @@
         }
       }
     },
+    "/api/v1/integration/changes": {
+      "get": {
+        "tags": [
+          "Integration"
+        ],
+        "summary": "INT-006: the tenant\u0027s changes ordered by (occurredAt, id); types are the domain event names (*V1). Pass\nnextCursor back unchanged; an unknown cursor is INTEGRATION_CURSOR_INVALID (start again without one).",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "take",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32",
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/integration/plans": {
       "get": {
         "tags": [

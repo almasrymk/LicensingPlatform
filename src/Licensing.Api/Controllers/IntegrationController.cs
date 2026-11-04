@@ -1,4 +1,5 @@
 using Licensing.Api.Infrastructure;
+using Licensing.Application.Abstractions;
 using Licensing.Application.Common;
 using Licensing.Application.Integrations;
 using Licensing.Application.Licensing;
@@ -17,7 +18,8 @@ namespace Licensing.Api.Controllers;
 [Route("api/v1/integration")]
 [Tags("Integration")]
 [EnableRateLimiting(RateLimits.Licensing)]
-public sealed class IntegrationController(IntegrationReadService reads, SubscriptionService subscriptions, LicenseService licenses, DeviceLicensingService devices) : ControllerBase
+public sealed class IntegrationController(
+    IntegrationReadService reads, SubscriptionService subscriptions, LicenseService licenses, DeviceLicensingService devices, IChangeFeed changes, ICurrentUser caller) : ControllerBase
 {
     public sealed record SeatHeartbeatRequest(string? AppVersion, string? Os);
 
@@ -30,6 +32,15 @@ public sealed class IntegrationController(IntegrationReadService reads, Subscrip
     [RequireScope(ApiScopes.SubscriptionsRead)]
     public async Task<IActionResult> Entitlements(Guid id, [FromQuery] string? productCode, CancellationToken ct) =>
         this.ToActionResult(await reads.EntitlementsAsync(id, productCode, ct));
+
+    /// <summary>
+    /// INT-006: the tenant's changes ordered by (occurredAt, id); types are the domain event names (*V1). Pass
+    /// nextCursor back unchanged; an unknown cursor is INTEGRATION_CURSOR_INVALID (start again without one).
+    /// </summary>
+    [HttpGet("changes")]
+    [RequireScope(ApiScopes.SubscriptionsRead)]
+    public async Task<IActionResult> Changes([FromQuery] string? cursor, [FromQuery] int take = 100, CancellationToken ct = default) =>
+        this.ToActionResult(await changes.ReadAsync(caller.TenantId!.Value, cursor, take, ct));
 
     [HttpGet("plans")]
     [RequireScope(ApiScopes.CatalogRead)]
