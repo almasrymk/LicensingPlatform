@@ -154,16 +154,39 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
 
     public async Task<bool> TryReserveActivationSlotAsync(Guid licenseId, CancellationToken ct)
     {
-        // Single conditional UPDATE: the database serializes concurrent attempts on the row, so the limit can never be exceeded.
+        // INT-015 (ADR-004): first the subscription-wide limit (the plan's MaxActivations over all its licenses), then the
+        // license's own optional limit. Each is one conditional UPDATE, so the database serializes concurrent attempts on
+        // the row and neither limit can be exceeded. A refused license step gives the subscription slot back.
+        var subscription = await Subscriptions
+            .Where(s => Licenses.Any(l => l.Id == licenseId && l.SubscriptionId == s.Id))
+            .Where(s => Plans.Where(p => p.Id == s.PlanId).Select(p => p.MaxActivations).FirstOrDefault() == null
+                        || s.ActiveDevices < Plans.Where(p => p.Id == s.PlanId).Select(p => p.MaxActivations).FirstOrDefault())
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.ActiveDevices, x => x.ActiveDevices + 1), ct);
+        if (subscription != 1)
+            return false;
+
         var updated = await Licenses
             .Where(l => l.Id == licenseId && (l.MaxActivations == null || l.ActiveActivations < l.MaxActivations))
             .ExecuteUpdateAsync(s => s.SetProperty(l => l.ActiveActivations, l => l.ActiveActivations + 1), ct);
-        return updated == 1;
+        if (updated == 1)
+            return true;
+        await ReleaseSubscriptionDevicesAsync(licenseId, 1, ct);
+        return false;
     }
+
+    public Task ReleaseSubscriptionDevicesAsync(Guid licenseId, int count, CancellationToken ct) =>
+        count <= 0
+            ? Task.CompletedTask
+            : Subscriptions.Where(s => Licenses.Any(l => l.Id == licenseId && l.SubscriptionId == s.Id))
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.ActiveDevices, x => x.ActiveDevices > count ? x.ActiveDevices - count : 0), ct);
 
     public void DiscardChanges() => ChangeTracker.Clear();
 
-    public Task ReleaseActivationSlotAsync(Guid licenseId, CancellationToken ct) =>
-        Licenses.Where(l => l.Id == licenseId && l.ActiveActivations > 0)
+    public async Task ReleaseActivationSlotAsync(Guid licenseId, CancellationToken ct)
+    {
+        var released = await Licenses.Where(l => l.Id == licenseId && l.ActiveActivations > 0)
             .ExecuteUpdateAsync(s => s.SetProperty(l => l.ActiveActivations, l => l.ActiveActivations - 1), ct);
+        if (released == 1)
+            await ReleaseSubscriptionDevicesAsync(licenseId, 1, ct);
+    }
 }

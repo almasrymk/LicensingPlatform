@@ -814,6 +814,9 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("ActiveDevices")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset?>("CancelledAt")
                         .HasColumnType("datetimeoffset");
 

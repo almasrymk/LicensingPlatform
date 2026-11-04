@@ -43,6 +43,8 @@ public interface IAppDbContext
     /// <summary>Atomically reserves one activation slot. Returns false when the limit is already reached.</summary>
     Task<bool> TryReserveActivationSlotAsync(Guid licenseId, CancellationToken ct);
 
+    /// <summary>Frees <paramref name="count"/> device slots of the license's subscription (INT-015), after a key regeneration.</summary>
+    Task ReleaseSubscriptionDevicesAsync(Guid licenseId, int count, CancellationToken ct);
     Task ReleaseActivationSlotAsync(Guid licenseId, CancellationToken ct);
 }
 

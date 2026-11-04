@@ -150,6 +150,7 @@ public sealed class LicenseService(
         var license = await db.Licenses.FirstOrDefaultAsync(l => l.Id == id, ct);
         if (license is null) return AppErrors.NotFound("License");
         var oldHash = license.ProductKeyHash;
+        var released = license.ActiveActivations;
         var now = clock.GetUtcNow();
         var (plainKey, hash, prefix) = keys.Generate();
         license.RegenerateKey(hash, prefix);
@@ -157,6 +158,7 @@ public sealed class LicenseService(
         activations.ForEach(a => a.Deactivate(now));
         audit.Add("license.key_regenerated", "License", id.ToString(), details: $"prefix={prefix} devices_released={activations.Count}", tenantId: license.TenantId);
         await db.SaveChangesAsync(ct);
+        await db.ReleaseSubscriptionDevicesAsync(id, released, ct);
         await cache.RemoveAsync(LicenseCacheKeys.For(license.TenantId, oldHash), ct);
         await cache.RemoveAsync(LicenseCacheKeys.For(license.TenantId, hash), ct);
         return new IssuedLicenseDto((await GetAsync(id, ct)).Value.License, plainKey);

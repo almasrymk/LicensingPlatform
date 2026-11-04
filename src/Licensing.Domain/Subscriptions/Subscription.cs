@@ -36,6 +36,13 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
     /// returns this subscription instead of creating another one.
     /// </summary>
     public string? ExternalReference { get; private set; }
+
+    /// <summary>
+    /// INT-015 (ADR-004): active devices across every license of this subscription. The plan's MaxActivations limits
+    /// this total, so issuing another license never adds capacity. Changed only by single conditional UPDATEs
+    /// (<c>IAppDbContext.TryReserveActivationSlotAsync</c> and the release methods), never through the tracked entity.
+    /// </summary>
+    public int ActiveDevices { get; private set; }
     /// <summary>Optimistic concurrency token.</summary>
     public int Version { get; private set; }
     public IReadOnlyCollection<SubscriptionHistory> History => _history.AsReadOnly();
