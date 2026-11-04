@@ -280,6 +280,52 @@ public sealed class DeviceLicensingService(
         return await RespondAsync(snapshot, deviceId, now, false, ct);
     }
 
+    /// <summary>
+    /// INT-004: Monitor Cloud's heartbeat for a seat it holds. Cloud keeps the license id, never the product key, so the
+    /// seat is found by id inside the caller's tenant. Same rules and answer as <see cref="HeartbeatAsync"/>.
+    /// </summary>
+    public async Task<Result<LicenseCheckResponse>> HeartbeatSeatAsync(Guid licenseId, string? deviceId, string? appVersion, string? os, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var device = deviceId?.Trim() ?? "";
+        if (!LicenseActivation.IsValidDeviceId(device)) return LicenseErrors.InvalidDevice;
+
+        var license = await db.Licenses.AsNoTracking().FirstOrDefaultAsync(l => l.Id == licenseId, ct);
+        var snapshot = license is null ? null : await LoadSnapshotAsync(license, ct);
+        if (snapshot is null) return LicenseErrors.InvalidLicense;
+        if (CheckRules(snapshot, null, now) is { } error) return error;
+
+        var activation = await db.LicenseActivations.FirstOrDefaultAsync(
+            a => a.LicenseId == licenseId && a.DeviceId == device && a.Status == ActivationStatus.Active, ct);
+        if (activation is null) return LicenseErrors.DeviceNotActivated;
+        activation.Heartbeat(appVersion, caller.IpAddress, now, os);
+        await db.SaveChangesAsync(ct);
+        return await RespondAsync(snapshot, device, now, false, ct);
+    }
+
+    /// <summary>
+    /// INT-005: Monitor Cloud gives a seat back (device retired or unlicensed). Frees the activation slot like
+    /// <see cref="DeactivateAsync"/>; <c>LIC_DEVICE_NOT_ACTIVATED</c> when the device holds no active seat.
+    /// </summary>
+    public async Task<Result> ReleaseSeatAsync(Guid licenseId, string? deviceId, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var device = deviceId?.Trim() ?? "";
+        var license = await db.Licenses.FirstOrDefaultAsync(l => l.Id == licenseId, ct);
+        if (license is null) return LicenseErrors.InvalidLicense;
+
+        var activation = await db.LicenseActivations.FirstOrDefaultAsync(
+            a => a.LicenseId == license.Id && a.DeviceId == device && a.Status == ActivationStatus.Active, ct);
+        if (activation is null) return LicenseErrors.DeviceNotActivated;
+
+        activation.Deactivate(now);
+        audit.Add("license.released", "License", license.Id.ToString(), details: $"device={device}", tenantId: license.TenantId);
+        await db.SaveChangesAsync(ct);
+        await db.ReleaseActivationSlotAsync(license.Id, ct);
+        await cache.RemoveAsync(LicenseCacheKeys.For(license.TenantId, license.ProductKeyHash), ct);
+        return Result.Success();
+    }
+
     public async Task<Result> DeactivateAsync(DeactivateRequest request, CancellationToken ct)
     {
         var now = clock.GetUtcNow();

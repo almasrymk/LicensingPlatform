@@ -17,8 +17,10 @@ namespace Licensing.Api.Controllers;
 [Route("api/v1/integration")]
 [Tags("Integration")]
 [EnableRateLimiting(RateLimits.Licensing)]
-public sealed class IntegrationController(IntegrationReadService reads, SubscriptionService subscriptions, LicenseService licenses) : ControllerBase
+public sealed class IntegrationController(IntegrationReadService reads, SubscriptionService subscriptions, LicenseService licenses, DeviceLicensingService devices) : ControllerBase
 {
+    public sealed record SeatHeartbeatRequest(string? AppVersion, string? Os);
+
     [HttpGet("customers")]
     [RequireScope(ApiScopes.CustomersRead)]
     public Task<PagedResult<IntegrationCustomer>> Customers([FromQuery] int page = 1, [FromQuery] int pageSize = 50, [FromQuery] DateTimeOffset? updatedSince = null, CancellationToken ct = default) =>
@@ -80,6 +82,18 @@ public sealed class IntegrationController(IntegrationReadService reads, Subscrip
     [RequireScope(ApiScopes.LicensesManage)]
     public async Task<IActionResult> ResumeLicense(Guid id, CancellationToken ct) =>
         this.ToActionResult(await licenses.ResumeAsync(id, ct));
+
+    /// <summary>INT-004: heartbeat of a seat held by Monitor Cloud; answers like <c>/licensing/heartbeat</c>.</summary>
+    [HttpPost("licenses/{id:guid}/devices/{deviceId}/heartbeat")]
+    [RequireScope(ApiScopes.LicensesValidate)]
+    public async Task<IActionResult> SeatHeartbeat(Guid id, string deviceId, SeatHeartbeatRequest? request, CancellationToken ct) =>
+        this.ToActionResult(await devices.HeartbeatSeatAsync(id, deviceId, request?.AppVersion, request?.Os, ct));
+
+    /// <summary>INT-005: gives a seat back. 204, or <c>LIC_DEVICE_NOT_ACTIVATED</c> when the device holds none.</summary>
+    [HttpPost("licenses/{id:guid}/devices/{deviceId}/release")]
+    [RequireScope(ApiScopes.LicensesActivate)]
+    public async Task<IActionResult> SeatRelease(Guid id, string deviceId, CancellationToken ct) =>
+        this.ToActionResult(await devices.ReleaseSeatAsync(id, deviceId, ct));
 
     [HttpPost("licenses/{id:guid}/revoke")]
     [RequireScope(ApiScopes.LicensesManage)]

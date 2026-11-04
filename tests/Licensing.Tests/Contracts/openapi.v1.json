@@ -3781,6 +3781,110 @@
         }
       }
     },
+    "/api/v1/integration/licenses/{id}/devices/{deviceId}/heartbeat": {
+      "post": {
+        "tags": [
+          "Integration"
+        ],
+        "summary": "INT-004: heartbeat of a seat held by Monitor Cloud; answers like \u0060/licensing/heartbeat\u0060.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "deviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SeatHeartbeatRequest"
+                  }
+                ]
+              }
+            },
+            "text/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SeatHeartbeatRequest"
+                  }
+                ]
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SeatHeartbeatRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/integration/licenses/{id}/devices/{deviceId}/release": {
+      "post": {
+        "tags": [
+          "Integration"
+        ],
+        "summary": "INT-005: gives a seat back. 204, or \u0060LIC_DEVICE_NOT_ACTIVATED\u0060 when the device holds none.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "deviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/integration/licenses/{id}/revoke": {
       "post": {
         "tags": [
@@ -6728,6 +6832,27 @@
             }
           },
           "icon": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "SeatHeartbeatRequest": {
+        "required": [
+          "appVersion",
+          "os"
+        ],
+        "type": "object",
+        "properties": {
+          "appVersion": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "os": {
             "type": [
               "null",
               "string"
