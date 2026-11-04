@@ -35,7 +35,8 @@ public sealed record LicenseFilter(Guid? CustomerId = null, Guid? SubscriptionId
 public sealed record ActivationFilter(string? State = null, Guid? LicenseId = null, Guid? ProductId = null, string? Os = null, Guid? TenantId = null);
 /// <summary>The only response that ever carries the full product key.</summary>
 public sealed record IssuedLicenseDto(LicenseDto License, string ProductKey);
-public sealed record LicenseActionRequest(string? Reason);
+/// <param name="ByCustomer">INT-013: as <see cref="Subscriptions.SubscriptionActionRequest"/>.</param>
+public sealed record LicenseActionRequest(string? Reason, bool ByCustomer = false);
 
 public sealed class LicenseService(
     IAppDbContext db, IProductKeyGenerator keys, ILicenseCache cache, IAuditLogger audit, ITenantContext scope, TimeProvider clock)
@@ -189,10 +190,10 @@ public sealed class LicenseService(
     }
 
     public Task<Result<LicenseDetailsDto>> SuspendAsync(Guid id, LicenseActionRequest request, CancellationToken ct) =>
-        MutateAsync(id, "license.suspended", l => l.Suspend(request.Reason), request.Reason, ct);
+        MutateAsync(id, request.ByCustomer ? "license.suspended_by_customer" : "license.suspended", l => l.Suspend(request.Reason, request.ByCustomer), request.Reason, ct);
 
-    public Task<Result<LicenseDetailsDto>> ResumeAsync(Guid id, CancellationToken ct) =>
-        MutateAsync(id, "license.resumed", l => l.Resume(), null, ct);
+    public Task<Result<LicenseDetailsDto>> ResumeAsync(Guid id, CancellationToken ct, bool byCustomer = false) =>
+        MutateAsync(id, byCustomer ? "license.resumed_by_customer" : "license.resumed", l => l.Resume(byCustomer), null, ct);
 
     public Task<Result<LicenseDetailsDto>> RevokeAsync(Guid id, LicenseActionRequest request, CancellationToken ct) =>
         MutateAsync(id, "license.revoked", l => l.Revoke(request.Reason, clock.GetUtcNow()), request.Reason, ct);

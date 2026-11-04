@@ -27,6 +27,8 @@ public static class LicenseErrors
     /// <summary>INT-020 (ADR-006): too many trial or free licenses were started from one network address in a day.</summary>
     public static readonly Error DeviceOfferLimit = new("LIC_DEVICE_OFFER_LIMIT",
         "Too many trial or free licenses were started from this network today. Try again tomorrow or contact support.", ErrorKind.TooManyRequests);
+    public static readonly Error SuspendedByProvider =
+        Error.Conflict("LICENSE_SUSPENDED_BY_PROVIDER", "This license was suspended by your provider. Contact them to resume it.");
     public static readonly Error FreeUsed = Error.Conflict("LIC_FREE_USED", "This device already has its free plan license.");
 }
 
@@ -61,6 +63,8 @@ public sealed class License : AggregateRoot, ICustomerOwned
     public int ActiveActivations { get; private set; }
     public DateTimeOffset? RevokedAt { get; private set; }
     public string? StatusReason { get; private set; }
+    /// <summary>INT-013: as <see cref="Subscriptions.Subscription.SuspendedByCustomer"/>, for one license.</summary>
+    public bool SuspendedByCustomer { get; private set; }
 
     public IReadOnlyList<string> Features =>
         FeaturesValue.Length == 0 ? [] : FeaturesValue.Split(';', StringSplitOptions.RemoveEmptyEntries);
@@ -104,17 +108,20 @@ public sealed class License : AggregateRoot, ICustomerOwned
         _ => null,
     };
 
-    public void Suspend(string? reason)
+    public void Suspend(string? reason, bool byCustomer = false)
     {
         if (Status != LicenseStatus.Active) throw new DomainException(LicenseErrors.InvalidTransition);
         Status = LicenseStatus.Suspended;
+        SuspendedByCustomer = byCustomer;
         StatusReason = reason;
         Raise(new LicenseStatusChangedV1(Id, TenantId, ProductKeyHash, Status));
     }
 
-    public void Resume()
+    public void Resume(bool byCustomer = false)
     {
         if (Status != LicenseStatus.Suspended) throw new DomainException(LicenseErrors.InvalidTransition);
+        if (byCustomer && !SuspendedByCustomer) throw new DomainException(LicenseErrors.SuspendedByProvider);
+        SuspendedByCustomer = false;
         Status = LicenseStatus.Active;
         StatusReason = null;
         Raise(new LicenseStatusChangedV1(Id, TenantId, ProductKeyHash, Status));

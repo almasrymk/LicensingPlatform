@@ -610,6 +610,9 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("SubscriptionId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("SuspendedByCustomer")
+                        .HasColumnType("bit");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
@@ -848,6 +851,9 @@ namespace Licensing.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
+
+                    b.Property<bool>("SuspendedByCustomer")
+                        .HasColumnType("bit");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");

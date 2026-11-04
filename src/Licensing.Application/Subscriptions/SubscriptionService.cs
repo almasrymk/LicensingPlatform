@@ -25,7 +25,12 @@ public sealed record StartSubscriptionRequest(Guid CustomerId, Guid PlanId, Date
 /// <param name="ExternalReference">INT-018: the caller's id for this renewal (a paid order). A repeat returns the subscription unchanged.</param>
 public sealed record RenewSubscriptionRequest(int? DurationDays, int? ExpectedVersion, string? ExternalReference = null);
 public sealed record ChangePlanRequest(Guid PlanId, int? ExpectedVersion);
-public sealed record SubscriptionActionRequest(string? Reason, int? ExpectedVersion);
+/// <param name="ByCustomer">
+/// INT-013: the caller (the website's service account) acts for the customer in self-service. A suspension made this way
+/// can be resumed the same way; a resume this way is refused when the provider's staff made the suspension. The flag
+/// can only restrict a resume or mark a suspension as the customer's, so accepting it from any caller grants nothing.
+/// </param>
+public sealed record SubscriptionActionRequest(string? Reason, int? ExpectedVersion, bool ByCustomer = false);
 
 public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, ILicenseCache cache, ITenantContext scope, TimeProvider clock)
 {
@@ -183,10 +188,12 @@ public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, IL
     }
 
     public Task<Result<SubscriptionDetailsDto>> SuspendAsync(Guid id, SubscriptionActionRequest request, CancellationToken ct) =>
-        MutateAsync(id, request.ExpectedVersion, "subscription.suspended", (sub, now) => { sub.Suspend(request.Reason, now); return Task.FromResult<Error?>(null); }, ct);
+        MutateAsync(id, request.ExpectedVersion, request.ByCustomer ? "subscription.suspended_by_customer" : "subscription.suspended",
+            (sub, now) => { sub.Suspend(request.Reason, now, request.ByCustomer); return Task.FromResult<Error?>(null); }, ct);
 
     public Task<Result<SubscriptionDetailsDto>> ResumeAsync(Guid id, SubscriptionActionRequest request, CancellationToken ct) =>
-        MutateAsync(id, request.ExpectedVersion, "subscription.resumed", (sub, now) => { sub.Resume(now); return Task.FromResult<Error?>(null); }, ct);
+        MutateAsync(id, request.ExpectedVersion, request.ByCustomer ? "subscription.resumed_by_customer" : "subscription.resumed",
+            (sub, now) => { sub.Resume(now, request.ByCustomer); return Task.FromResult<Error?>(null); }, ct);
 
     public Task<Result<SubscriptionDetailsDto>> CancelAsync(Guid id, SubscriptionActionRequest request, CancellationToken ct) =>
         MutateAsync(id, request.ExpectedVersion, "subscription.cancelled", (sub, now) => { sub.Cancel(request.Reason, now); return Task.FromResult<Error?>(null); }, ct);

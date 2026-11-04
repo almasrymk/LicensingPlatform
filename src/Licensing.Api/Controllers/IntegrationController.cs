@@ -91,8 +91,9 @@ public sealed class IntegrationController(
 
     [HttpPost("licenses/{id:guid}/resume")]
     [RequireScope(ApiScopes.LicensesManage)]
-    public async Task<IActionResult> ResumeLicense(Guid id, CancellationToken ct) =>
-        this.ToActionResult(await licenses.ResumeAsync(id, ct));
+    public async Task<IActionResult> ResumeLicense(Guid id,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] LicenseActionRequest? request, CancellationToken ct) =>
+        this.ToActionResult(await licenses.ResumeAsync(id, ct, request?.ByCustomer ?? false));
 
     /// <summary>INT-004: heartbeat of a seat held by Monitor Cloud; answers like <c>/licensing/heartbeat</c>.</summary>
     [HttpPost("licenses/{id:guid}/devices/{deviceId}/heartbeat")]

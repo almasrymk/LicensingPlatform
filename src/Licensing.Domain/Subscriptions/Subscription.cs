@@ -43,6 +43,13 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
     /// (<c>IAppDbContext.TryReserveActivationSlotAsync</c> and the release methods), never through the tracked entity.
     /// </summary>
     public int ActiveDevices { get; private set; }
+
+    /// <summary>
+    /// INT-013: true when the customer suspended it themselves (through the website). A customer can resume only such a
+    /// suspension; one made by the provider's staff stays until staff resume it. Rows suspended before this existed are
+    /// treated as staff suspensions.
+    /// </summary>
+    public bool SuspendedByCustomer { get; private set; }
     /// <summary>Optimistic concurrency token.</summary>
     public int Version { get; private set; }
     public IReadOnlyCollection<SubscriptionHistory> History => _history.AsReadOnly();
@@ -125,18 +132,24 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
         Raise(new SubscriptionPlanChangedV1(Id, TenantId, oldPlan, newPlanId));
     }
 
-    public void Suspend(string? reason, DateTimeOffset now)
+    public static readonly Error SuspendedByProvider =
+        Error.Conflict("SUBSCRIPTION_SUSPENDED_BY_PROVIDER", "This subscription was suspended by your provider. Contact them to resume it.");
+
+    public void Suspend(string? reason, DateTimeOffset now, bool byCustomer = false)
     {
         Ensure(SubscriptionAction.Suspend);
         var from = Status;
         Status = SubscriptionStatus.Suspended;
+        SuspendedByCustomer = byCustomer;
         Record(SubscriptionAction.Suspend, from, Status, now, reason);
         Raise(new SubscriptionSuspendedV1(Id, TenantId));
     }
 
-    public void Resume(DateTimeOffset now)
+    public void Resume(DateTimeOffset now, bool byCustomer = false)
     {
         Ensure(SubscriptionAction.Resume);
+        if (byCustomer && !SuspendedByCustomer) throw new DomainException(SuspendedByProvider);
+        SuspendedByCustomer = false;
         Status = TrialEndsAt is not null && TrialEndsAt > now ? SubscriptionStatus.Trial : SubscriptionStatus.Active;
         Record(SubscriptionAction.Resume, SubscriptionStatus.Suspended, Status, now, null);
         Raise(new SubscriptionResumedV1(Id, TenantId));
