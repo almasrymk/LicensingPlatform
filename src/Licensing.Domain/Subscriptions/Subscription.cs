@@ -92,7 +92,8 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
         return sub;
     }
 
-    public void Renew(int? durationDays, DateTimeOffset now)
+    /// <param name="reference">INT-018: the caller's id for this renewal (a paid order). Kept on the history entry, unique per subscription.</param>
+    public void Renew(int? durationDays, DateTimeOffset now, string? reference = null)
     {
         Ensure(SubscriptionAction.Renew);
         var from = Status;
@@ -107,7 +108,8 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
         }
         TrialEndsAt = null;
         Status = SubscriptionStatus.Active;
-        Record(SubscriptionAction.Renew, from, Status, now, EndDate is null ? "lifetime" : $"until {EndDate:yyyy-MM-dd}");
+        Record(SubscriptionAction.Renew, from, Status, now, EndDate is null ? "lifetime" : $"until {EndDate:yyyy-MM-dd}",
+            string.IsNullOrWhiteSpace(reference) ? null : reference.Trim());
         Raise(new SubscriptionRenewedV1(Id, TenantId, EndDate));
     }
 
@@ -169,10 +171,10 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
                 "SUBSCRIPTION_INVALID_TRANSITION", $"Cannot {action} a subscription that is {Status}."));
     }
 
-    private void Record(SubscriptionAction action, SubscriptionStatus? from, SubscriptionStatus to, DateTimeOffset at, string? details)
+    private void Record(SubscriptionAction action, SubscriptionStatus? from, SubscriptionStatus to, DateTimeOffset at, string? details, string? reference = null)
     {
         Version++;
-        _history.Add(new SubscriptionHistory(Id, TenantId, action, from, to, at, details));
+        _history.Add(new SubscriptionHistory(Id, TenantId, action, from, to, at, details, reference));
     }
 }
 
@@ -181,8 +183,9 @@ public sealed class SubscriptionHistory : Entity, ITenantOwned
     private SubscriptionHistory() { }
 
     internal SubscriptionHistory(Guid subscriptionId, Guid tenantId, SubscriptionAction action,
-        SubscriptionStatus? fromStatus, SubscriptionStatus toStatus, DateTimeOffset at, string? details)
+        SubscriptionStatus? fromStatus, SubscriptionStatus toStatus, DateTimeOffset at, string? details, string? reference = null)
     {
+        Reference = reference;
         SubscriptionId = subscriptionId;
         TenantId = tenantId;
         Action = action;
@@ -199,6 +202,9 @@ public sealed class SubscriptionHistory : Entity, ITenantOwned
     public SubscriptionStatus ToStatus { get; private set; }
     public DateTimeOffset At { get; private set; }
     public string? Details { get; private set; }
+
+    /// <summary>The caller's id of the action (a renewal's paid order). Unique per subscription.</summary>
+    public string? Reference { get; private set; }
 }
 
 // Integration events published through the outbox. The V1 suffix is part of the contract.

@@ -22,7 +22,8 @@ public sealed record SubscriptionFilter(Guid? CustomerId = null, SubscriptionSta
 
 /// <param name="ExternalReference">Optional caller id (INT-016). A repeat with the same reference returns the first subscription.</param>
 public sealed record StartSubscriptionRequest(Guid CustomerId, Guid PlanId, DateTimeOffset? StartDate, string? Notes, string? ExternalReference = null);
-public sealed record RenewSubscriptionRequest(int? DurationDays, int? ExpectedVersion);
+/// <param name="ExternalReference">INT-018: the caller's id for this renewal (a paid order). A repeat returns the subscription unchanged.</param>
+public sealed record RenewSubscriptionRequest(int? DurationDays, int? ExpectedVersion, string? ExternalReference = null);
 public sealed record ChangePlanRequest(Guid PlanId, int? ExpectedVersion);
 public sealed record SubscriptionActionRequest(string? Reason, int? ExpectedVersion);
 
@@ -133,10 +134,35 @@ public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, IL
 
     public async Task<Result<SubscriptionDetailsDto>> RenewAsync(Guid id, RenewSubscriptionRequest request, CancellationToken ct)
     {
+        var reference = string.IsNullOrWhiteSpace(request.ExternalReference) ? null : request.ExternalReference.Trim();
+        if (reference is { Length: > 100 })
+            return Error.Validation("VALIDATION_FAILED", "ExternalReference must be at most 100 characters.");
+        if (reference is null)
+            return await RenewOnceAsync(id, request, null, ct);
+
+        // INT-018: a paid renewal is applied once per reference, even when the caller retries after a lost answer
+        // or two retries race (the reference is unique per subscription, and the version is a concurrency token).
+        try
+        {
+            return await RenewOnceAsync(id, request, reference, ct);
+        }
+        catch (DbUpdateException)
+        {
+            db.DiscardChanges();
+            if (await db.SubscriptionHistory.AnyAsync(h => h.SubscriptionId == id && h.Reference == reference, ct))
+                return await GetAsync(id, ct);
+            throw;
+        }
+    }
+
+    private async Task<Result<SubscriptionDetailsDto>> RenewOnceAsync(Guid id, RenewSubscriptionRequest request, string? reference, CancellationToken ct)
+    {
+        if (reference is not null && await db.SubscriptionHistory.AnyAsync(h => h.SubscriptionId == id && h.Reference == reference, ct))
+            return await GetAsync(id, ct);
         return await MutateAsync(id, request.ExpectedVersion, "subscription.renewed", async (sub, now) =>
         {
             var plan = await db.Plans.FirstAsync(p => p.Id == sub.PlanId, ct);
-            sub.Renew(request.DurationDays ?? plan.DurationDays, now);
+            sub.Renew(request.DurationDays ?? plan.DurationDays, now, reference);
             // Licenses follow the subscription's new end date (and come back if they expired with it).
             var licenses = await db.Licenses.Where(l => l.SubscriptionId == sub.Id).ToListAsync(ct);
             licenses.ForEach(l => { if (l.Status != Domain.Licensing.LicenseStatus.Revoked) l.Reinstate(sub.EndDate); });

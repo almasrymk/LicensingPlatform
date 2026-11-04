@@ -890,6 +890,10 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.Property<int?>("FromStatus")
                         .HasColumnType("int");
 
+                    b.Property<string>("Reference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<Guid>("SubscriptionId")
                         .HasColumnType("uniqueidentifier");
 
@@ -902,6 +906,10 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("SubscriptionId");
+
+                    b.HasIndex("SubscriptionId", "Reference")
+                        .IsUnique()
+                        .HasFilter("[Reference] IS NOT NULL");
 
                     b.ToTable("SubscriptionHistory", "subscriptions");
                 });

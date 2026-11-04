@@ -91,4 +91,40 @@ public sealed class ExternalReferenceTests : IClassFixture<TestAppFixture>
         Assert.NotEqual(a.GetProperty("customer").GetProperty("id").GetGuid(), b.GetProperty("customer").GetProperty("id").GetGuid());
         Assert.Equal("Sample Office B", b.GetProperty("customer").GetProperty("name").GetString());
     }
+
+    [Fact]
+    public async Task A_paid_renewal_with_the_same_reference_extends_the_subscription_once()
+    {
+        // INT-018: the website retries a renewal after a lost answer; the term must not be extended twice.
+        var issued = await _setup.IssueAsync(durationDays: 365);
+        var before = await _app.WithDbAsync(db => db.Subscriptions.IgnoreQueryFilters().Where(s => s.Id == issued.SubscriptionId).Select(s => s.EndDate).FirstAsync());
+        var reference = NewReference();
+        var path = $"/api/v1/subscriptions/{issued.SubscriptionId}/renew";
+
+        var first = await (await issued.Admin.PostJsonAsync(path, new { externalReference = reference })).OkJsonAsync();
+        var again = await (await issued.Admin.PostJsonAsync(path, new { externalReference = reference })).OkJsonAsync();
+
+        var end = first.GetProperty("subscription").GetProperty("endDate").GetDateTimeOffset();
+        Assert.Equal(before!.Value.AddDays(365), end, TimeSpan.FromSeconds(1));
+        Assert.Equal(end, again.GetProperty("subscription").GetProperty("endDate").GetDateTimeOffset());
+        Assert.Equal(1, await _app.WithDbAsync(db => db.SubscriptionHistory.IgnoreQueryFilters().CountAsync(h => h.Reference == reference)));
+
+        var other = await (await issued.Admin.PostJsonAsync(path, new { externalReference = NewReference() })).OkJsonAsync();
+        Assert.Equal(end.AddDays(365), other.GetProperty("subscription").GetProperty("endDate").GetDateTimeOffset(), TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
+    public async Task Parallel_renewals_with_one_reference_extend_once()
+    {
+        var issued = await _setup.IssueAsync(durationDays: 30);
+        var before = await _app.WithDbAsync(db => db.Subscriptions.IgnoreQueryFilters().Where(s => s.Id == issued.SubscriptionId).Select(s => s.EndDate).FirstAsync());
+        var reference = NewReference();
+
+        var answers = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ =>
+            issued.Admin.PostJsonAsync($"/api/v1/subscriptions/{issued.SubscriptionId}/renew", new { externalReference = reference })));
+
+        Assert.All(answers, a => Assert.Equal(HttpStatusCode.OK, a.StatusCode));
+        var end = await _app.WithDbAsync(db => db.Subscriptions.IgnoreQueryFilters().Where(s => s.Id == issued.SubscriptionId).Select(s => s.EndDate).FirstAsync());
+        Assert.Equal(before!.Value.AddDays(30), end!.Value, TimeSpan.FromSeconds(1));
+    }
 }

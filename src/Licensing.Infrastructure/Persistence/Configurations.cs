@@ -143,6 +143,10 @@ internal sealed class SubscriptionHistoryConfig : IEntityTypeConfiguration<Subsc
     {
         b.ToTable("SubscriptionHistory", "subscriptions");
         b.Property(x => x.Details).HasMaxLength(500);
+        b.Property(x => x.Reference).HasMaxLength(100);
+        // The filtered index covers only rows with a reference, so the foreign key keeps its own index.
+        b.HasIndex(x => x.SubscriptionId);
+        b.HasIndex(x => new { x.SubscriptionId, x.Reference }).IsUnique().HasFilter("[Reference] IS NOT NULL");
     }
 }
 
