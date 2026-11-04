@@ -26,6 +26,7 @@ public static class DependencyInjection
         services.AddScoped<LicenseService>();
         services.AddScoped<DeviceLicensingService>();
         services.AddScoped<ApiClientService>();
+        services.AddScoped<IntegrationReadService>();
         services.AddScoped<AuditQueryService>();
         services.AddScoped<ReportService>();
         services.AddScoped<Media.MediaService>();
