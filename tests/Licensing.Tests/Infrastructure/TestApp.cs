@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Licensing.Infrastructure.Identity;
 using Licensing.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -81,7 +82,24 @@ public sealed class TestApp : WebApplicationFactory<Program>
         {
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(Clock);
+            services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter, TestRemoteIpFilter>();
         });
+    }
+
+    /// <summary>Header a test sends to choose its client address (TestServer has none).</summary>
+    public const string RemoteIpHeader = "X-Test-Remote-Ip";
+
+    private sealed class TestRemoteIpFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
+    {
+        public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next) => app =>
+        {
+            app.Use((context, nextMiddleware) =>
+            {
+                if (context.Request.Headers.TryGetValue(RemoteIpHeader, out var ip)) context.Connection.RemoteIpAddress = IPAddress.Parse(ip.ToString());
+                return nextMiddleware(context);
+            });
+            next(app);
+        };
     }
 
     public HttpClient Anonymous() => CreateClient();

@@ -24,6 +24,9 @@ public static class LicenseErrors
     public static readonly Error TrialUnavailable = Error.NotFound("LIC_TRIAL_UNAVAILABLE", "This product has no published plan with trial days.");
     public static readonly Error TrialUsed = Error.Conflict("LIC_TRIAL_USED", "This device has already used its trial.");
     public static readonly Error FreeUnavailable = Error.NotFound("LIC_FREE_UNAVAILABLE", "This product has no current free plan.");
+    /// <summary>INT-020 (ADR-006): too many trial or free licenses were started from one network address in a day.</summary>
+    public static readonly Error DeviceOfferLimit = new("LIC_DEVICE_OFFER_LIMIT",
+        "Too many trial or free licenses were started from this network today. Try again tomorrow or contact support.", ErrorKind.TooManyRequests);
     public static readonly Error FreeUsed = Error.Conflict("LIC_FREE_USED", "This device already has its free plan license.");
 }
 

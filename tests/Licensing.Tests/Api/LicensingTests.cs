@@ -730,6 +730,45 @@ public sealed class DeviceTrialTests : IClassFixture<TestAppFixture>
     }
 
     [Fact]
+    public async Task One_network_address_can_start_a_limited_number_of_trials_a_day()
+    {
+        // INT-020 (ADR-006): device trials stay, with a per-address daily limit (DeviceOffers:PerIpPerDay, default 10).
+        var code = await ProductAsync(trialDays: 14);
+        var device = await Device();
+        var ip = $"203.0.113.{Random.Shared.Next(1, 254)}";
+        device.DefaultRequestHeaders.Add(TestApp.RemoteIpHeader, ip);
+        var run = Guid.NewGuid().ToString("N")[..8];
+        for (var i = 0; i < 10; i++)
+            await (await device.PostJsonAsync("/api/v1/licensing/trial", new { deviceId = $"LIMIT-{run}-{i:D2}", productCode = code })).OkJsonAsync();
+
+        var refused = await device.PostJsonAsync("/api/v1/licensing/trial", new { deviceId = $"LIMIT-{run}-10", productCode = code });
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, refused.StatusCode);
+        Assert.Equal("LIC_DEVICE_OFFER_LIMIT", await refused.ErrorCodeAsync());
+        var elsewhere = await Device();
+        elsewhere.DefaultRequestHeaders.Add(TestApp.RemoteIpHeader, "198.51.100.7");
+        await (await elsewhere.PostJsonAsync("/api/v1/licensing/trial", new { deviceId = $"LIMIT-{run}-11", productCode = code })).OkJsonAsync();
+        Assert.True(await _app.WithDbAsync(db => db.AuditRecords.AnyAsync(a => a.Action == "license.trial_refused" && a.Details!.Contains($"LIMIT-{run}-10"))));
+    }
+
+    [Fact]
+    public async Task Concurrent_trial_requests_from_one_device_start_one_trial()
+    {
+        // INT-020: the Notes check was read-then-write; the subscription's unique reference now decides.
+        var code = await ProductAsync(trialDays: 14);
+        var device = await Device();
+        var body = new { deviceId = $"RACE-{Guid.NewGuid():N}"[..20], productCode = code };
+
+        var answers = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => device.PostJsonAsync("/api/v1/licensing/trial", body)));
+
+        Assert.Single(answers, a => a.StatusCode == HttpStatusCode.OK);
+        foreach (var refused in answers.Where(a => a.StatusCode != HttpStatusCode.OK))
+            Assert.Equal("LIC_TRIAL_USED", await refused.ErrorCodeAsync());
+        var marker = "device-trial:" + body.deviceId;
+        Assert.Equal(1, await _app.WithDbAsync(db => db.Subscriptions.CountAsync(s => s.Notes == marker)));
+    }
+
+    [Fact]
     public async Task A_product_without_trial_days_has_no_trial()
     {
         var code = await ProductAsync(trialDays: null);

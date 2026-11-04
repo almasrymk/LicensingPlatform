@@ -21,6 +21,17 @@ public sealed record DeviceCheckRequest(Guid LicenseId, string DeviceId, string?
 /// </summary>
 public sealed record DeviceActivationResponse(LicenseCheckResponse License, string DeviceCredential);
 
+/// <summary>
+/// INT-020 (ADR-006) anti-abuse limits for the device trial and free plan. A device gets one of each per product (kept
+/// unique by the database), and one network address can start at most <see cref="PerIpPerDay"/> of each per 24 hours.
+/// Several real computers can share an address behind NAT, so the default is generous; 0 turns the address limit off.
+/// </summary>
+public sealed class DeviceOfferOptions
+{
+    public const string Section = "DeviceOffers";
+    public int PerIpPerDay { get; set; } = 10;
+}
+
 public sealed record TrialRequest(string DeviceId, string? DeviceName, string? ProductCode, string? AppVersion, string? Os = null);
 
 /// <summary>A device's free plan: the product key (returned once) and the activation result. No expiry for a lifetime free plan.</summary>
@@ -62,8 +73,11 @@ public sealed class DeviceLicensingService(
     IAuditLogger audit,
     ISecretHasher secrets,
     ITenantScope scope,
-    TimeProvider clock)
+    TimeProvider clock,
+    Microsoft.Extensions.Options.IOptions<DeviceOfferOptions>? offerOptions = null)
 {
+    private readonly DeviceOfferOptions _offers = offerOptions?.Value ?? new DeviceOfferOptions();
+
     /// <summary>Prefix of device credentials, so secret scanners can recognise them.</summary>
     public const string CredentialPrefix = "lcd_";
     public static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
@@ -102,6 +116,12 @@ public sealed class DeviceLicensingService(
             await db.SaveChangesAsync(ct);
             return LicenseErrors.TrialUsed;
         }
+        if (await OverAddressLimitAsync(tenantId, TrialMarkerPrefix, now, ct))
+        {
+            audit.Add("license.trial_refused", "Product", product.Id.ToString(), false, $"device={deviceId} reason=address-limit", tenantId);
+            await db.SaveChangesAsync(ct);
+            return LicenseErrors.DeviceOfferLimit;
+        }
 
         var customer = await db.Customers.FirstOrDefaultAsync(c => c.TenantId == tenantId && c.Name == TrialCustomerName, ct);
         if (customer is null)
@@ -114,7 +134,8 @@ public sealed class DeviceLicensingService(
             return LicenseErrors.TrialUnavailable;
         }
 
-        var sub = Subscription.Start(tenantId, customer.Id, product.Id, plan.Id, now, plan.DurationDays, plan.TrialDays, now, marker);
+        var sub = Subscription.Start(tenantId, customer.Id, product.Id, plan.Id, now, plan.DurationDays, plan.TrialDays, now, marker,
+            OfferReference(TrialMarkerPrefix, product.Id, deviceId));
         db.Subscriptions.Add(sub);
         var (plainKey, hash, prefix) = keys.Generate();
         var license = License.Issue(tenantId, customer.Id, sub.Id, product.Id, plan.Id, LicenseService.NewLicenseNumber(now),
@@ -122,7 +143,7 @@ public sealed class DeviceLicensingService(
         db.Licenses.Add(license);
         audit.Add("license.trial_started", "License", license.Id.ToString(),
             details: $"number={license.LicenseNumber} prefix={prefix} device={deviceId} ends={sub.EndDate:O}", tenantId: tenantId);
-        await db.SaveChangesAsync(ct);
+        if (!await TrySaveOfferAsync(ct)) return LicenseErrors.TrialUsed;
 
         if (!await db.TryReserveActivationSlotAsync(license.Id, ct))
             return LicenseErrors.ActivationLimitReached;
@@ -135,8 +156,45 @@ public sealed class DeviceLicensingService(
         return new TrialResponse(plainKey, response.Value, plan.TrialDays!.Value);
     }
 
-    private static string TrialMarker(string deviceId) => $"device-trial:{deviceId}";
-    private static string FreeMarker(string deviceId) => $"device-free:{deviceId}";
+    private const string TrialMarkerPrefix = "device-trial:";
+    private const string FreeMarkerPrefix = "device-free:";
+    private static string TrialMarker(string deviceId) => TrialMarkerPrefix + deviceId;
+    private static string FreeMarker(string deviceId) => FreeMarkerPrefix + deviceId;
+
+    /// <summary>
+    /// INT-020: the subscription's unique reference for a device offer, so two concurrent requests from one device cannot
+    /// both start one (the Notes check alone is a read-then-write race). The device id is hashed to fit 100 characters.
+    /// </summary>
+    internal static string OfferReference(string markerPrefix, Guid productId, string deviceId) =>
+        $"{markerPrefix}{productId:N}:{Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(deviceId))).TrimEnd('=').Replace('+', '-').Replace('/', '_')}";
+
+    private async Task<bool> TrySaveOfferAsync(CancellationToken ct)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateException)
+        {
+            // The unique (TenantId, ExternalReference) index: the same device started this offer a moment ago.
+            db.DiscardChanges();
+            return false;
+        }
+    }
+
+    /// <summary>INT-020: how many offers of this kind the caller's address started in the last 24 hours.</summary>
+    private async Task<bool> OverAddressLimitAsync(Guid tenantId, string markerPrefix, DateTimeOffset now, CancellationToken ct)
+    {
+        if (_offers.PerIpPerDay <= 0 || string.IsNullOrEmpty(caller.IpAddress)) return false;
+        var ip = caller.IpAddress;
+        var since = now.AddDays(-1);
+        var started = await db.ActivationAttempts
+            .Where(a => a.TenantId == tenantId && a.At > since && a.IpAddress == ip && a.Success && a.LicenseId != null)
+            .Where(a => db.Licenses.Any(l => l.Id == a.LicenseId && db.Subscriptions.Any(s => s.Id == l.SubscriptionId && s.Notes != null && s.Notes.StartsWith(markerPrefix))))
+            .CountAsync(ct);
+        return started >= _offers.PerIpPerDay;
+    }
 
     /// <summary>The published trial or free plan the admin chose as the product's current offer, if any.</summary>
     private Task<Plan?> CurrentOfferAsync(Guid tenantId, Guid productId, PlanKind kind, CancellationToken ct) =>
@@ -164,6 +222,12 @@ public sealed class DeviceLicensingService(
         var marker = FreeMarker(deviceId);
         if (await db.Subscriptions.AnyAsync(s => s.TenantId == tenantId && s.ProductId == product.Id && s.Notes == marker, ct))
             return LicenseErrors.FreeUsed;
+        if (await OverAddressLimitAsync(tenantId, FreeMarkerPrefix, now, ct))
+        {
+            audit.Add("license.free_refused", "Product", product.Id.ToString(), false, $"device={deviceId} reason=address-limit", tenantId);
+            await db.SaveChangesAsync(ct);
+            return LicenseErrors.DeviceOfferLimit;
+        }
 
         var customer = await db.Customers.FirstOrDefaultAsync(c => c.TenantId == tenantId && c.Name == FreeCustomerName, ct);
         if (customer is null)
@@ -176,7 +240,8 @@ public sealed class DeviceLicensingService(
             return LicenseErrors.FreeUnavailable;
         }
 
-        var sub = Subscription.Start(tenantId, customer.Id, product.Id, plan.Id, now, plan.DurationDays, null, now, marker);
+        var sub = Subscription.Start(tenantId, customer.Id, product.Id, plan.Id, now, plan.DurationDays, null, now, marker,
+            OfferReference(FreeMarkerPrefix, product.Id, deviceId));
         db.Subscriptions.Add(sub);
         var (plainKey, hash, prefix) = keys.Generate();
         var license = License.Issue(tenantId, customer.Id, sub.Id, product.Id, plan.Id, LicenseService.NewLicenseNumber(now),
@@ -184,7 +249,7 @@ public sealed class DeviceLicensingService(
         db.Licenses.Add(license);
         audit.Add("license.free_started", "License", license.Id.ToString(),
             details: $"number={license.LicenseNumber} prefix={prefix} device={deviceId} plan={plan.Code}", tenantId: tenantId);
-        await db.SaveChangesAsync(ct);
+        if (!await TrySaveOfferAsync(ct)) return LicenseErrors.FreeUsed;
 
         if (!await db.TryReserveActivationSlotAsync(license.Id, ct))
             return LicenseErrors.ActivationLimitReached;

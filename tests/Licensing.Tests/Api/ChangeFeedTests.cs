@@ -91,7 +91,7 @@ public sealed class ChangeFeedTests : IClassFixture<ChangeFeedFixture>
         Assert.DoesNotContain("payload", raw, StringComparison.OrdinalIgnoreCase);
         var returned = JsonDocument.Parse(raw).RootElement.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("id").GetGuid()).ToHashSet();
         Assert.NotEmpty(returned);
-        Assert.Empty(foreign.Where(returned.Contains));
+        Assert.DoesNotContain(foreign, returned.Contains);
     }
 
     [Fact]
