@@ -116,6 +116,8 @@ public sealed class LicensingFlowTests : IClassFixture<TestAppFixture>
         var beat = await (await device.PostJsonAsync("/api/v1/licensing/heartbeat", body)).OkJsonAsync();
 
         Assert.NotEqual(Guid.Empty, customerId);
+        var claims = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(activated.GetProperty("token").GetString());
+        Assert.Equal(customerId.ToString(), claims.Claims.Single(c => c.Type == "cid").Value);
         foreach (var answer in new[] { activated, validated, beat })
         {
             Assert.Equal(issued.LicenseId, answer.GetProperty("licenseId").GetGuid());

@@ -522,7 +522,7 @@ public sealed class DeviceLicensingService(
 
         var token = await signer.SignAsync(new LicenseTokenClaims(
             s.LicenseNumber, s.LicenseId, s.TenantId, s.ProductCode, s.PlanCode, deviceId, s.Features,
-            s.ExpiresAt, checkAfter, offlineUntil), ct);
+            s.ExpiresAt, checkAfter, offlineUntil, s.CustomerId), ct);
 
         return new LicenseCheckResponse("active", s.LicenseNumber, s.ProductCode, s.PlanCode, s.Features, s.ExpiresAt,
             s.MaxActivations, s.ActiveActivations, checkAfter, offlineUntil, token.Token, token.Kid, alreadyActivated,

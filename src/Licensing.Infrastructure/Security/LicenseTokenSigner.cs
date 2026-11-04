@@ -106,6 +106,9 @@ public sealed class EcdsaLicenseTokenSigner(AppDbContext db, ISecretStore secret
             new("features", JsonSerializer.Serialize(c.Features), JsonClaimValueTypes.JsonArray),
             new("check_after", c.CheckAfter.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64),
         };
+        // Plan 04 LP-2 (INT-003): the customer id, so Monitor Cloud can match a token to its tenant. Additive claim.
+        if (c.CustomerId is { } customer)
+            claims.Add(new Claim("cid", customer.ToString()));
         if (c.LicenseExpiresAt is { } exp)
             claims.Add(new Claim("lic_exp", exp.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64));
 
