@@ -21,14 +21,20 @@ public sealed record FreePlanResponse(string ProductKey, LicenseCheckResponse Li
 public sealed record TrialResponse(string ProductKey, LicenseCheckResponse License, int TrialDays);
 
 /// <summary>Response of activate, validate and heartbeat. <c>Token</c> lets the client keep working offline until <c>OfflineValidUntil</c>.</summary>
+/// <remarks>
+/// <see cref="LicenseId"/>, <see cref="CustomerId"/> and <see cref="SubscriptionId"/> identify the seat for integrations
+/// (Monitor Cloud maps the device to a tenant by <see cref="CustomerId"/>, INT-003). They are additive: older clients
+/// ignore them. They are never <see cref="Guid.Empty"/>.
+/// </remarks>
 public sealed record LicenseCheckResponse(
     string Status, string LicenseNumber, string ProductCode, string PlanCode, IReadOnlyList<string> Features,
     DateTimeOffset? ExpiresAt, int? MaxActivations, int ActiveActivations, DateTimeOffset CheckAfter,
-    DateTimeOffset OfflineValidUntil, string Token, string Kid, bool AlreadyActivated = false);
+    DateTimeOffset OfflineValidUntil, string Token, string Kid, bool AlreadyActivated,
+    Guid LicenseId, Guid CustomerId, Guid SubscriptionId);
 
 /// <summary>Cached projection used by validate. Contains no secrets.</summary>
 public sealed record LicenseSnapshot(
-    Guid LicenseId, Guid TenantId, Guid CustomerId, string LicenseNumber, string ProductCode, string PlanCode,
+    Guid LicenseId, Guid TenantId, Guid CustomerId, Guid SubscriptionId, string LicenseNumber, string ProductCode, string PlanCode,
     LicenseStatus Status, DateTimeOffset? ExpiresAt, IReadOnlyList<string> Features, int? MaxActivations,
     int ActiveActivations, int HeartbeatIntervalHours, int OfflineGraceDays, SubscriptionStatus SubscriptionStatus,
     bool TenantActive, bool CustomerActive, IReadOnlyList<string> ActiveDevices);
@@ -327,7 +333,7 @@ public sealed class DeviceLicensingService(
             .Where(a => a.LicenseId == l.Id && a.Status == ActivationStatus.Active).Select(a => a.DeviceId).ToListAsync(ct);
         var active = await db.Licenses.Where(x => x.Id == l.Id).Select(x => x.ActiveActivations).FirstAsync(ct);
 
-        return new LicenseSnapshot(l.Id, l.TenantId, l.CustomerId, l.LicenseNumber, l.ProductCode, l.PlanCode, l.Status, l.ExpiresAt,
+        return new LicenseSnapshot(l.Id, l.TenantId, l.CustomerId, l.SubscriptionId, l.LicenseNumber, l.ProductCode, l.PlanCode, l.Status, l.ExpiresAt,
             l.Features, l.MaxActivations, active, l.HeartbeatIntervalHours, l.OfflineGraceDays, info.Status,
             info.TenantActive, info.CustomerActive, devices);
     }
@@ -345,7 +351,8 @@ public sealed class DeviceLicensingService(
             s.ExpiresAt, checkAfter, offlineUntil), ct);
 
         return new LicenseCheckResponse("active", s.LicenseNumber, s.ProductCode, s.PlanCode, s.Features, s.ExpiresAt,
-            s.MaxActivations, s.ActiveActivations, checkAfter, offlineUntil, token.Token, token.Kid, alreadyActivated);
+            s.MaxActivations, s.ActiveActivations, checkAfter, offlineUntil, token.Token, token.Kid, alreadyActivated,
+            s.LicenseId, s.CustomerId, s.SubscriptionId);
     }
 
     private async Task<Result<LicenseCheckResponse>> FailAttemptAsync(

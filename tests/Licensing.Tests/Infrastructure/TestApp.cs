@@ -23,11 +23,15 @@ public sealed class TestClock : TimeProvider
 
 /// <summary>
 /// The real API host on an isolated database. SQLite by default; set LICENSING_TEST_SQLSERVER=1 to run the same
-/// tests against the local SQL Server (database LicensingPlatform_Tests_*).
+/// tests against the local SQL Server (database lic_test_*). LICENSING_TEST_SQLSERVER_SERVER, when set, replaces the
+/// default "Server=.;Trusted_Connection=True" part (for a SQL Server in a container; never commit its password).
 /// </summary>
 public sealed class TestApp : WebApplicationFactory<Program>
 {
     public static readonly bool UseSqlServer = Environment.GetEnvironmentVariable("LICENSING_TEST_SQLSERVER") == "1";
+
+    private static string SqlServerBase =>
+        Environment.GetEnvironmentVariable("LICENSING_TEST_SQLSERVER_SERVER") is { Length: > 0 } server ? server : "Server=.;Trusted_Connection=True";
 
     private readonly string _dbName = $"lic_test_{Guid.NewGuid():N}";
     private readonly string _workDir = Path.Combine(Path.GetTempPath(), "licensing-tests", Guid.NewGuid().ToString("N"));
@@ -52,7 +56,7 @@ public sealed class TestApp : WebApplicationFactory<Program>
             {
                 ["Database:Provider"] = UseSqlServer ? "SqlServer" : "Sqlite",
                 ["ConnectionStrings:Default"] = UseSqlServer
-                    ? $"Server=.;Database={_dbName};Trusted_Connection=True;TrustServerCertificate=True"
+                    ? $"{SqlServerBase};Database={_dbName};TrustServerCertificate=True"
                     : $"Data Source={Path.Combine(_workDir, "test.db")};Default Timeout=60",
                 ["ConnectionStrings:Redis"] = "",
                 ["Jwt:SigningKey"] = "TEST-ONLY-jwt-signing-key-0123456789abcdef0123",

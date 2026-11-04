@@ -102,6 +102,28 @@ public sealed class LicensingFlowTests : IClassFixture<TestAppFixture>
         Assert.Equal(0, count);
     }
 
+    /// <summary>INT-003: activation, validation and heartbeat answers identify the license, customer and subscription.</summary>
+    [Fact]
+    public async Task Activation_answers_carry_license_customer_and_subscription_ids()
+    {
+        var issued = await _setup.IssueAsync();
+        var device = await Device();
+        var customerId = await _app.WithDbAsync(db => db.Licenses.Where(l => l.Id == issued.LicenseId).Select(l => l.CustomerId).FirstAsync());
+        var body = new { productKey = issued.Key, deviceId = "IDS-DEVICE-0001", productCode = issued.ProductCode };
+
+        var activated = await (await device.PostJsonAsync("/api/v1/licensing/activate", body)).OkJsonAsync();
+        var validated = await (await device.PostJsonAsync("/api/v1/licensing/validate", body)).OkJsonAsync();
+        var beat = await (await device.PostJsonAsync("/api/v1/licensing/heartbeat", body)).OkJsonAsync();
+
+        Assert.NotEqual(Guid.Empty, customerId);
+        foreach (var answer in new[] { activated, validated, beat })
+        {
+            Assert.Equal(issued.LicenseId, answer.GetProperty("licenseId").GetGuid());
+            Assert.Equal(customerId, answer.GetProperty("customerId").GetGuid());
+            Assert.Equal(issued.SubscriptionId, answer.GetProperty("subscriptionId").GetGuid());
+        }
+    }
+
     /// <summary>Critical scenario 2: 50 concurrent activations of a license with MaxActivations 5 produce exactly 5.</summary>
     [Fact]
     public async Task Concurrent_activations_never_exceed_the_limit()

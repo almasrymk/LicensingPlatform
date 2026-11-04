@@ -272,7 +272,8 @@ public sealed class LicenseService(
 
 public static class LicenseCacheKeys
 {
-    public static string For(Guid tenantId, string keyHash) => $"lic:{tenantId:N}:{keyHash}";
+    // "lic2": LicenseSnapshot gained SubscriptionId (INT-003); entries cached by an older build are never read back.
+    public static string For(Guid tenantId, string keyHash) => $"lic2:{tenantId:N}:{keyHash}";
 }
 
 /// <summary>Anything that changes whether a license validates (subscription, customer, tenant) drops its cached result.</summary>
