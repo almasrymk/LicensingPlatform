@@ -20,7 +20,8 @@ public sealed record SubscriptionDetailsDto(SubscriptionDto Subscription, IReadO
 public sealed record SubscriptionFilter(Guid? CustomerId = null, SubscriptionStatus? Status = null, Guid? ProductId = null, Guid? PlanId = null,
     Guid? TenantId = null, DateTimeOffset? EndFrom = null, DateTimeOffset? EndTo = null);
 
-public sealed record StartSubscriptionRequest(Guid CustomerId, Guid PlanId, DateTimeOffset? StartDate, string? Notes);
+/// <param name="ExternalReference">Optional caller id (INT-016). A repeat with the same reference returns the first subscription.</param>
+public sealed record StartSubscriptionRequest(Guid CustomerId, Guid PlanId, DateTimeOffset? StartDate, string? Notes, string? ExternalReference = null);
 public sealed record RenewSubscriptionRequest(int? DurationDays, int? ExpectedVersion);
 public sealed record ChangePlanRequest(Guid PlanId, int? ExpectedVersion);
 public sealed record SubscriptionActionRequest(string? Reason, int? ExpectedVersion);
@@ -90,13 +91,44 @@ public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, IL
         if (plan.Status != PlanStatus.Published)
             return Error.Conflict("PLAN_NOT_PUBLISHED", "Only published plans can be subscribed to.");
 
+        var reference = string.IsNullOrWhiteSpace(request.ExternalReference) ? null : request.ExternalReference.Trim();
+        if (reference is { Length: > 100 })
+            return Error.Validation("VALIDATION_FAILED", "ExternalReference must be at most 100 characters.");
+        if (reference is not null && await ReplayAsync(customer.TenantId, reference, request, ct) is { } replay)
+            return replay;
+
         var now = clock.GetUtcNow();
         var sub = Subscription.Start(customer.TenantId, customer.Id, plan.ProductId, plan.Id, request.StartDate ?? now,
-            plan.DurationDays, plan.TrialDays, now, request.Notes);
+            plan.DurationDays, plan.TrialDays, now, request.Notes, reference);
         db.Subscriptions.Add(sub);
         audit.Add("subscription.started", "Subscription", sub.Id.ToString(), details: $"plan={plan.Code} v{plan.Version}", tenantId: sub.TenantId);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException) when (reference is not null)
+        {
+            // A parallel start with the same reference won; answer with its subscription.
+            db.DiscardChanges();
+            if (await ReplayAsync(customer.TenantId, reference, request, ct) is { } raced)
+                return raced;
+            throw;
+        }
+
         return await GetAsync(sub.Id, ct);
+    }
+
+    /// <summary>The subscription an earlier start with this reference created, or a conflict if it was for another customer or plan.</summary>
+    private async Task<Result<SubscriptionDetailsDto>?> ReplayAsync(Guid tenantId, string reference, StartSubscriptionRequest request, CancellationToken ct)
+    {
+        var existing = await db.Subscriptions.AsNoTracking()
+            .Where(s => s.TenantId == tenantId && s.ExternalReference == reference)
+            .Select(s => new { s.Id, s.CustomerId, s.PlanId })
+            .FirstOrDefaultAsync(ct);
+        if (existing is null) return null;
+        if (existing.CustomerId != request.CustomerId || existing.PlanId != request.PlanId)
+            return Error.Conflict("SUBSCRIPTION_REFERENCE_CONFLICT", "This external reference already belongs to another subscription.");
+        return await GetAsync(existing.Id, ct);
     }
 
     public async Task<Result<SubscriptionDetailsDto>> RenewAsync(Guid id, RenewSubscriptionRequest request, CancellationToken ct)

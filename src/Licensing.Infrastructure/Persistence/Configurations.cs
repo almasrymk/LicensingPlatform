@@ -63,6 +63,8 @@ internal sealed class CustomerConfig : IEntityTypeConfiguration<Customer>
         b.Property(x => x.Phone).HasMaxLength(50);
         b.Property(x => x.Country).HasMaxLength(100);
         b.Property(x => x.TaxNumber).HasMaxLength(50);
+        b.Property(x => x.ExternalReference).HasMaxLength(100);
+        b.HasIndex(x => new { x.TenantId, x.ExternalReference }).IsUnique().HasFilter("[ExternalReference] IS NOT NULL");
         b.HasMany(x => x.Contacts).WithOne().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Cascade);
         b.Navigation(x => x.Contacts).UsePropertyAccessMode(PropertyAccessMode.Field);
         b.Ignore(x => x.DomainEvents);
@@ -127,6 +129,8 @@ internal sealed class SubscriptionConfig : IEntityTypeConfiguration<Subscription
         b.HasIndex(x => new { x.Status, x.EndDate });
         b.Property(x => x.Version).IsConcurrencyToken();
         b.Property(x => x.Notes).HasMaxLength(1000);
+        b.Property(x => x.ExternalReference).HasMaxLength(100);
+        b.HasIndex(x => new { x.TenantId, x.ExternalReference }).IsUnique().HasFilter("[ExternalReference] IS NOT NULL");
         b.HasMany(x => x.History).WithOne().HasForeignKey(x => x.SubscriptionId).OnDelete(DeleteBehavior.Cascade);
         b.Navigation(x => x.History).UsePropertyAccessMode(PropertyAccessMode.Field);
         b.Ignore(x => x.DomainEvents);

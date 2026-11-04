@@ -37,6 +37,9 @@ public interface IAppDbContext
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>Forgets every pending change, after a save lost a race on a unique key.</summary>
+    void DiscardChanges();
+
     /// <summary>Atomically reserves one activation slot. Returns false when the limit is already reached.</summary>
     Task<bool> TryReserveActivationSlotAsync(Guid licenseId, CancellationToken ct);
 

@@ -6947,6 +6947,12 @@
               "string"
             ],
             "format": "uuid"
+          },
+          "externalReference": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -7149,6 +7155,12 @@
             "format": "date-time"
           },
           "notes": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "externalReference": {
             "type": [
               "null",
               "string"

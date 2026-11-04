@@ -161,6 +161,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
         return updated == 1;
     }
 
+    public void DiscardChanges() => ChangeTracker.Clear();
+
     public Task ReleaseActivationSlotAsync(Guid licenseId, CancellationToken ct) =>
         Licenses.Where(l => l.Id == licenseId && l.ActiveActivations > 0)
             .ExecuteUpdateAsync(s => s.SetProperty(l => l.ActiveActivations, l => l.ActiveActivations - 1), ct);

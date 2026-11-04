@@ -30,6 +30,12 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? CancelledAt { get; private set; }
     public string? Notes { get; private set; }
+
+    /// <summary>
+    /// The caller's own id for this subscription (INT-016), unique per tenant. A repeated start with the same reference
+    /// returns this subscription instead of creating another one.
+    /// </summary>
+    public string? ExternalReference { get; private set; }
     /// <summary>Optimistic concurrency token.</summary>
     public int Version { get; private set; }
     public IReadOnlyCollection<SubscriptionHistory> History => _history.AsReadOnly();
@@ -48,7 +54,7 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
 
     public static Subscription Start(
         Guid tenantId, Guid customerId, Guid productId, Guid planId, DateTimeOffset start,
-        int? durationDays, int? trialDays, DateTimeOffset now, string? notes = null)
+        int? durationDays, int? trialDays, DateTimeOffset now, string? notes = null, string? externalReference = null)
     {
         var sub = new Subscription
         {
@@ -59,6 +65,7 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
             StartDate = start,
             CreatedAt = now,
             Notes = notes?.Trim(),
+            ExternalReference = string.IsNullOrWhiteSpace(externalReference) ? null : externalReference.Trim(),
         };
 
         if (trialDays is > 0)

@@ -222,6 +222,10 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<string>("ExternalReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<Guid?>("ImageId")
                         .HasColumnType("uniqueidentifier");
 
@@ -245,6 +249,10 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ExternalReference")
+                        .IsUnique()
+                        .HasFilter("[ExternalReference] IS NOT NULL");
 
                     b.HasIndex("TenantId", "Name");
 
@@ -818,6 +826,10 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("EndDate")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<string>("ExternalReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -849,6 +861,10 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.HasIndex("Status", "EndDate");
 
                     b.HasIndex("TenantId", "CustomerId");
+
+                    b.HasIndex("TenantId", "ExternalReference")
+                        .IsUnique()
+                        .HasFilter("[ExternalReference] IS NOT NULL");
 
                     b.ToTable("Subscriptions", "subscriptions");
                 });
