@@ -55,6 +55,7 @@ public static class DependencyInjection
         services.AddScoped<ICurrentUser, HttpCurrentUser>();
         services.AddScoped<TenantContext>();
         services.AddScoped<ITenantContext>(sp => sp.GetRequiredService<TenantContext>());
+        services.AddScoped<ITenantScope>(sp => sp.GetRequiredService<TenantContext>());
 
         // ---- Security ----
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();

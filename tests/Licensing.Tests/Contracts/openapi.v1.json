@@ -3301,6 +3301,162 @@
         }
       }
     },
+    "/api/v1/licensing/device/activate": {
+      "post": {
+        "tags": [
+          "Licensing (device credential)"
+        ],
+        "summary": "Activates this device with a product key and returns \u0060{ license, deviceCredential }\u0060. The credential is\nshown only here. Activating the same device again returns a new credential and invalidates the previous one.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/licensing/device/validate": {
+      "post": {
+        "tags": [
+          "Licensing (device credential)"
+        ],
+        "parameters": [
+          {
+            "name": "X-Device-Credential",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/licensing/device/heartbeat": {
+      "post": {
+        "tags": [
+          "Licensing (device credential)"
+        ],
+        "parameters": [
+          {
+            "name": "X-Device-Credential",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/licensing/device/deactivate": {
+      "post": {
+        "tags": [
+          "Licensing (device credential)"
+        ],
+        "parameters": [
+          {
+            "name": "X-Device-Credential",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/integration/customers": {
       "get": {
         "tags": [
@@ -5352,6 +5508,35 @@
           },
           "deviceId": {
             "type": "string"
+          }
+        }
+      },
+      "DeviceCheckRequest": {
+        "required": [
+          "licenseId",
+          "deviceId",
+          "appVersion"
+        ],
+        "type": "object",
+        "properties": {
+          "licenseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceId": {
+            "type": "string"
+          },
+          "appVersion": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "os": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -7562,6 +7747,9 @@
     },
     {
       "name": "Licensing"
+    },
+    {
+      "name": "Licensing (device credential)"
     },
     {
       "name": "Integration"

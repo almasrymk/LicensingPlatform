@@ -75,6 +75,15 @@ public interface ITenantContext
     bool IsUnrestricted { get; }
 }
 
+/// <summary>
+/// Lets an anonymous, product-key-authenticated request act inside the tenant that owns the key (INT-002). Only
+/// <see cref="Licensing.DeviceLicensingService"/> uses it, after resolving the key itself.
+/// </summary>
+public interface ITenantScope
+{
+    void RunAsSystem(Guid? tenantId);
+}
+
 public interface IPasswordHasher
 {
     string Hash(string password);

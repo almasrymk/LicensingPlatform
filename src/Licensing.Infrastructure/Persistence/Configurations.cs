@@ -177,6 +177,7 @@ internal sealed class LicenseActivationConfig : IEntityTypeConfiguration<License
         b.Property(x => x.AppVersion).HasMaxLength(50);
         b.Property(x => x.LastIpAddress).HasMaxLength(64);
         b.Property(x => x.OperatingSystem).HasMaxLength(100);
+        b.Property(x => x.CredentialHash).HasMaxLength(128);
     }
 }
 

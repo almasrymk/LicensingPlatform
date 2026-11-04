@@ -12,6 +12,15 @@ namespace Licensing.Application.Licensing;
 public sealed record ActivateRequest(string ProductKey, string DeviceId, string? DeviceName, string? ProductCode, string? AppVersion, string? Os = null);
 public sealed record ValidateRequest(string ProductKey, string DeviceId, string? ProductCode, string? AppVersion, string? Os = null);
 public sealed record DeactivateRequest(string ProductKey, string DeviceId);
+/// <summary>INT-002: the seat a device credential belongs to. The credential itself travels in a header, never in the body.</summary>
+public sealed record DeviceCheckRequest(Guid LicenseId, string DeviceId, string? AppVersion, string? Os = null);
+
+/// <summary>
+/// INT-002: a product-key activation. <see cref="DeviceCredential"/> is returned only here, once; the platform keeps
+/// only its keyed hash. Activating the same device again issues a new credential and invalidates the old one.
+/// </summary>
+public sealed record DeviceActivationResponse(LicenseCheckResponse License, string DeviceCredential);
+
 public sealed record TrialRequest(string DeviceId, string? DeviceName, string? ProductCode, string? AppVersion, string? Os = null);
 
 /// <summary>A device's free plan: the product key (returned once) and the activation result. No expiry for a lifetime free plan.</summary>
@@ -51,8 +60,12 @@ public sealed class DeviceLicensingService(
     ILicenseTokenSigner signer,
     ILicenseCache cache,
     IAuditLogger audit,
+    ISecretHasher secrets,
+    ITenantScope scope,
     TimeProvider clock)
 {
+    /// <summary>Prefix of device credentials, so secret scanners can recognise them.</summary>
+    public const string CredentialPrefix = "lcd_";
     public static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
 
     /// <summary>The customer that owns trial licenses started by devices themselves, one per tenant.</summary>
@@ -184,10 +197,95 @@ public sealed class DeviceLicensingService(
         return new FreePlanResponse(plainKey, response.Value, plan.Code, plan.DurationDays);
     }
 
-    public async Task<Result<LicenseCheckResponse>> ActivateAsync(ActivateRequest request, CancellationToken ct)
+    public Task<Result<LicenseCheckResponse>> ActivateAsync(ActivateRequest request, CancellationToken ct) =>
+        ActivateCoreAsync(caller.TenantId!.Value, request, ct);
+
+    /// <summary>
+    /// INT-002 (ADR-001): activation by product key alone, for an Agent without an API client. The key proves ownership;
+    /// the tenant is the license's. Same rules as <see cref="ActivateAsync"/>, then a device credential is issued.
+    /// </summary>
+    public async Task<Result<DeviceActivationResponse>> ActivateWithKeyAsync(ActivateRequest request, CancellationToken ct)
+    {
+        var hash = HashOrNull(request.ProductKey);
+        scope.RunAsSystem(null);
+        var owner = hash is null ? null : await db.Licenses.AsNoTracking().Where(l => l.ProductKeyHash == hash).Select(l => (Guid?)l.TenantId).FirstOrDefaultAsync(ct);
+        // An unknown key gets the same answer as any other invalid license, and no tenant to record the attempt in.
+        if (owner is not { } tenantId) return LicenseErrors.InvalidLicense;
+        scope.RunAsSystem(tenantId);
+
+        var activated = await ActivateCoreAsync(tenantId, request, ct);
+        if (activated.IsFailure) return activated.Error!;
+
+        var deviceId = request.DeviceId.Trim();
+        var licenseId = activated.Value.LicenseId;
+        var activation = await db.LicenseActivations.FirstAsync(a => a.LicenseId == licenseId && a.DeviceId == deviceId && a.Status == ActivationStatus.Active, ct);
+        var credential = CredentialPrefix + secrets.GenerateToken(32);
+        activation.IssueCredential(secrets.Hash(credential));
+        audit.Add("license.device_credential_issued", "License", licenseId.ToString(), details: $"device={deviceId}", tenantId: tenantId);
+        await db.SaveChangesAsync(ct);
+        return new DeviceActivationResponse(activated.Value, credential);
+    }
+
+    /// <summary>INT-002: validate (cached rules) or heartbeat (fresh token) with a device credential.</summary>
+    public async Task<Result<LicenseCheckResponse>> CheckWithCredentialAsync(DeviceCheckRequest request, string? credential, bool heartbeat, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
-        var tenantId = caller.TenantId!.Value;
+        var found = await FindCredentialSeatAsync(request.LicenseId, request.DeviceId, credential, ct);
+        if (found is not { } seat) return LicenseErrors.DeviceNotActivated;
+
+        var snapshot = await LoadSnapshotAsync(seat.License, ct);
+        if (snapshot is null) return LicenseErrors.InvalidLicense;
+        if (CheckRules(snapshot, null, now) is { } error) return error;
+        if (heartbeat)
+        {
+            seat.Activation.Heartbeat(request.AppVersion, caller.IpAddress, now, request.Os);
+            await db.SaveChangesAsync(ct);
+        }
+
+        return await RespondAsync(snapshot, seat.Activation.DeviceId, now, false, ct);
+    }
+
+    /// <summary>INT-002: the device gives its own seat back.</summary>
+    public async Task<Result> DeactivateWithCredentialAsync(DeviceCheckRequest request, string? credential, CancellationToken ct)
+    {
+        var found = await FindCredentialSeatAsync(request.LicenseId, request.DeviceId, credential, ct);
+        if (found is not { } seat) return LicenseErrors.DeviceNotActivated;
+
+        seat.Activation.Deactivate(clock.GetUtcNow());
+        audit.Add("license.deactivated", "License", seat.License.Id.ToString(), details: $"device={seat.Activation.DeviceId}", tenantId: seat.License.TenantId);
+        await db.SaveChangesAsync(ct);
+        await db.ReleaseActivationSlotAsync(seat.License.Id, ct);
+        await cache.RemoveAsync(LicenseCacheKeys.For(seat.License.TenantId, seat.License.ProductKeyHash), ct);
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// The active seat whose credential matches. Unknown license, unknown device, inactive seat and wrong credential all
+    /// return null, so a caller cannot tell them apart. Hashes are compared in fixed time.
+    /// </summary>
+    private async Task<(License License, LicenseActivation Activation)?> FindCredentialSeatAsync(Guid licenseId, string? deviceId, string? credential, CancellationToken ct)
+    {
+        var device = deviceId?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(credential) || credential.Length > 200 || !credential.StartsWith(CredentialPrefix, StringComparison.Ordinal) ||
+            !LicenseActivation.IsValidDeviceId(device))
+            return null;
+
+        scope.RunAsSystem(null);
+        var activation = await db.LicenseActivations.FirstOrDefaultAsync(a => a.LicenseId == licenseId && a.DeviceId == device && a.Status == ActivationStatus.Active, ct);
+        var expected = activation?.CredentialHash;
+        var actual = secrets.Hash(credential);
+        if (activation is null || expected is null ||
+            !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(expected), System.Text.Encoding.UTF8.GetBytes(actual)))
+            return null;
+
+        scope.RunAsSystem(activation.TenantId);
+        var license = await db.Licenses.FirstOrDefaultAsync(l => l.Id == licenseId, ct);
+        return license is null ? null : (license, activation);
+    }
+
+    private async Task<Result<LicenseCheckResponse>> ActivateCoreAsync(Guid tenantId, ActivateRequest request, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
         var deviceId = request.DeviceId?.Trim() ?? "";
         var hash = HashOrNull(request.ProductKey);
         var prefix = PrefixOf(request.ProductKey);

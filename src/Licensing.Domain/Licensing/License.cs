@@ -180,6 +180,14 @@ public sealed class LicenseActivation : Entity, ICustomerOwned
     public string? LastIpAddress { get; private set; }
     public string? OperatingSystem { get; private set; }
 
+    /// <summary>
+    /// Keyed hash of this device's credential (INT-002, ADR-001). Issued by a product-key activation; null for seats
+    /// activated through an API client. Cleared when the seat is deactivated.
+    /// </summary>
+    public string? CredentialHash { get; private set; }
+
+    public void IssueCredential(string hash) => CredentialHash = hash;
+
     public static LicenseActivation Create(License license, string deviceId, string? deviceName, string? appVersion, string? ip, DateTimeOffset now, string? os = null) => new()
     {
         TenantId = license.TenantId,
@@ -222,6 +230,7 @@ public sealed class LicenseActivation : Entity, ICustomerOwned
     {
         Status = ActivationStatus.Deactivated;
         DeactivatedAt = now;
+        CredentialHash = null;
     }
 
     public static bool IsValidDeviceId(string? deviceId) =>

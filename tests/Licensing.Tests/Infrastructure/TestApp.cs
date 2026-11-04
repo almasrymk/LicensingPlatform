@@ -72,6 +72,7 @@ public sealed class TestApp : WebApplicationFactory<Program>
                 ["RateLimits:LoginPerMinute"] = "1000",
                 ["RateLimits:ClientTokenPerMinute"] = "1000",
                 ["RateLimits:LicensingPerMinute"] = "100000",
+                ["RateLimits:DeviceLicensingPerMinute"] = "100000",
             };
             foreach (var (k, v) in _overrides) settings[k] = v;
             config.AddInMemoryCollection(settings);
