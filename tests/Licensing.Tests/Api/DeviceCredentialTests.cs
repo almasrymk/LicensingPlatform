@@ -118,6 +118,24 @@ public sealed class DeviceCredentialTests : IClassFixture<TestAppFixture>
     }
 
     [Fact]
+    public async Task Claim_gives_an_API_client_seat_a_credential_without_taking_a_slot()
+    {
+        var issued = await _setup.IssueAsync(maxActivations: 1);
+        var client = await _app.ClientTokenAsync(DemoAccounts.NourClientId, DemoAccounts.NourClientSecret);
+        await (await client.PostJsonAsync("/api/v1/licensing/activate", new { productKey = issued.Key, deviceId = "CRED-CLAIM-DEV-01" })).OkJsonAsync();
+        var anonymous = _app.Anonymous();
+
+        var claimed = await (await anonymous.PostJsonAsync("/api/v1/licensing/device/claim", new { productKey = issued.Key, deviceId = "CRED-CLAIM-DEV-01" })).OkJsonAsync();
+        var notActive = await anonymous.PostJsonAsync("/api/v1/licensing/device/claim", new { productKey = issued.Key, deviceId = "CRED-CLAIM-DEV-02" });
+        var credential = claimed.GetProperty("deviceCredential").GetString()!;
+
+        Assert.Equal("LIC_DEVICE_NOT_ACTIVATED", await notActive.ErrorCodeAsync());
+        Assert.Equal(1, claimed.GetProperty("license").GetProperty("activeActivations").GetInt32());
+        await (await PostAsync(anonymous, "/api/v1/licensing/device/heartbeat", new { licenseId = issued.LicenseId, deviceId = "CRED-CLAIM-DEV-01" }, credential)).OkJsonAsync();
+        Assert.Equal(1, await _app.WithDbAsync(db => db.Licenses.IgnoreQueryFilters().Where(l => l.Id == issued.LicenseId).Select(l => l.ActiveActivations).FirstAsync()));
+    }
+
+    [Fact]
     public async Task The_existing_API_client_routes_still_work_and_their_seat_has_no_credential()
     {
         var issued = await _setup.IssueAsync();

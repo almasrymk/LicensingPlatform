@@ -3334,6 +3334,39 @@
         }
       }
     },
+    "/api/v1/licensing/device/claim": {
+      "post": {
+        "tags": [
+          "Licensing (device credential)"
+        ],
+        "summary": "For an installation already activated through an API client: returns a credential for the seat it holds, without\ntaking a new slot. \u0060LIC_DEVICE_NOT_ACTIVATED\u0060 when the device has no active seat.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/licensing/device/validate": {
       "post": {
         "tags": [

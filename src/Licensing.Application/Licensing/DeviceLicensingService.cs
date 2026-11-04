@@ -226,6 +226,36 @@ public sealed class DeviceLicensingService(
         return new DeviceActivationResponse(activated.Value, credential);
     }
 
+    /// <summary>
+    /// INT-002 migration: an installation that was activated through an API client asks for a credential for the seat it
+    /// already holds. Never takes a new slot: a device without an active seat gets <c>LIC_DEVICE_NOT_ACTIVATED</c>.
+    /// </summary>
+    public async Task<Result<DeviceActivationResponse>> ClaimWithKeyAsync(ValidateRequest request, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var deviceId = request.DeviceId?.Trim() ?? "";
+        if (!LicenseActivation.IsValidDeviceId(deviceId)) return LicenseErrors.InvalidDevice;
+        var hash = HashOrNull(request.ProductKey);
+        scope.RunAsSystem(null);
+        var license = hash is null ? null : await db.Licenses.FirstOrDefaultAsync(l => l.ProductKeyHash == hash, ct);
+        if (license is null) return LicenseErrors.InvalidLicense;
+        scope.RunAsSystem(license.TenantId);
+
+        var snapshot = await LoadSnapshotAsync(license, ct);
+        if (snapshot is null) return LicenseErrors.InvalidLicense;
+        if (CheckRules(snapshot, request.ProductCode, now) is { } error) return error;
+        var activation = await db.LicenseActivations.FirstOrDefaultAsync(a => a.LicenseId == license.Id && a.DeviceId == deviceId && a.Status == ActivationStatus.Active, ct);
+        if (activation is null) return LicenseErrors.DeviceNotActivated;
+
+        activation.Heartbeat(request.AppVersion, caller.IpAddress, now, request.Os);
+        var credential = CredentialPrefix + secrets.GenerateToken(32);
+        activation.IssueCredential(secrets.Hash(credential));
+        audit.Add("license.device_credential_issued", "License", license.Id.ToString(), details: $"device={deviceId} claim=true", tenantId: license.TenantId);
+        await db.SaveChangesAsync(ct);
+        var answer = await RespondAsync(snapshot, deviceId, now, true, ct);
+        return answer.IsSuccess ? new DeviceActivationResponse(answer.Value, credential) : answer.Error!;
+    }
+
     /// <summary>INT-002: validate (cached rules) or heartbeat (fresh token) with a device credential.</summary>
     public async Task<Result<LicenseCheckResponse>> CheckWithCredentialAsync(DeviceCheckRequest request, string? credential, bool heartbeat, CancellationToken ct)
     {

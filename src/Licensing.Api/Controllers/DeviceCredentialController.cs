@@ -31,6 +31,17 @@ public sealed class DeviceCredentialController(DeviceLicensingService licensing)
         return this.ToActionResult(await licensing.ActivateWithKeyAsync(request, ct));
     }
 
+    /// <summary>
+    /// For an installation already activated through an API client: returns a credential for the seat it holds, without
+    /// taking a new slot. <c>LIC_DEVICE_NOT_ACTIVATED</c> when the device has no active seat.
+    /// </summary>
+    [HttpPost("claim")]
+    public async Task<IActionResult> Claim(ValidateRequest request, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        return this.ToActionResult(await licensing.ClaimWithKeyAsync(request, ct));
+    }
+
     [HttpPost("validate")]
     public async Task<IActionResult> Validate(DeviceCheckRequest request, [FromHeader(Name = CredentialHeader)] string? credential, CancellationToken ct) =>
         this.ToActionResult(await licensing.CheckWithCredentialAsync(request, credential, heartbeat: false, ct));
