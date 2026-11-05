@@ -160,6 +160,25 @@ public sealed class License : AggregateRoot, ICustomerOwned
         Raise(new LicenseStatusChangedV1(Id, TenantId, ProductKeyHash, Status));
     }
 
+    /// <summary>
+    /// E4: follows a plan change of its subscription. The entitlement snapshot (plan, version, features, limits) becomes
+    /// the new plan's, as if issued on it, and the expiry follows the subscription. Seats are never touched here: a
+    /// downgrade below the active devices leaves them active (no commercial policy approves removing them).
+    /// </summary>
+    public void ApplyPlan(Guid planId, Entitlements entitlements, DateTimeOffset? expiresAt)
+    {
+        if (Status == LicenseStatus.Revoked) throw new DomainException(LicenseErrors.InvalidTransition);
+        PlanId = planId;
+        PlanCode = entitlements.PlanCode;
+        PlanVersion = entitlements.PlanVersion;
+        FeaturesValue = string.Join(';', entitlements.Features);
+        MaxActivations = entitlements.MaxActivations;
+        HeartbeatIntervalHours = entitlements.HeartbeatIntervalHours;
+        OfflineGraceDays = entitlements.OfflineGraceDays;
+        Raise(new LicenseEntitlementsChangedV1(Id, TenantId, CustomerId, SubscriptionId, PlanCode, PlanVersion));
+        Reinstate(expiresAt);
+    }
+
     /// <summary>Follows the subscription when it is renewed (licenses expired with it come back).</summary>
     public void Reinstate(DateTimeOffset? expiresAt)
     {
@@ -278,4 +297,6 @@ public sealed class ActivationAttempt : Entity, ITenantOwned
 }
 
 public sealed record LicenseIssuedV1(Guid LicenseId, Guid TenantId, Guid CustomerId, string LicenseNumber) : DomainEvent;
+/// <summary>E4: a license's entitlements changed with its subscription's plan (in the change feed with its ids).</summary>
+public sealed record LicenseEntitlementsChangedV1(Guid LicenseId, Guid TenantId, Guid CustomerId, Guid SubscriptionId, string PlanCode, int PlanVersion) : DomainEvent;
 public sealed record LicenseStatusChangedV1(Guid LicenseId, Guid TenantId, string ProductKeyHash, LicenseStatus Status) : DomainEvent;

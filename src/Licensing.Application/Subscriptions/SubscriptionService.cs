@@ -3,6 +3,7 @@ using Licensing.Application.Common;
 using Licensing.Application.Licensing;
 using Licensing.Domain.Catalog;
 using Licensing.Domain.Customers;
+using Licensing.Domain.Licensing;
 using Licensing.Domain.Subscriptions;
 using Licensing.SharedKernel;
 using Microsoft.EntityFrameworkCore;
@@ -183,6 +184,19 @@ public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, IL
             if (plan is null || plan.ProductId != sub.ProductId) return AppErrors.NotFound("Plan");
             if (plan.Status != PlanStatus.Published) return Error.Conflict("PLAN_NOT_PUBLISHED", "Only published plans can be used.");
             sub.ChangePlan(plan.Id, plan.DurationDays, now);
+
+            // E4: every license that is not revoked follows the new plan (entitlements, features, expiry), and each
+            // change enters the change feed, so Monitor Cloud refreshes the tenant and pushes new tokens to its agents.
+            var productCode = await db.Products.Where(p => p.Id == sub.ProductId).Select(p => p.Code).FirstAsync(ct);
+            var licenses = await db.Licenses.Where(l => l.SubscriptionId == sub.Id && l.Status != LicenseStatus.Revoked).ToListAsync(ct);
+            foreach (var license in licenses)
+                license.ApplyPlan(plan.Id, plan.ToEntitlements(productCode), sub.EndDate);
+
+            // A downgrade below the devices in use: recorded, never enforced by deactivating (no approved policy). New
+            // activations are refused until the subscription is back under its limit.
+            if (plan.MaxActivations is { } limit && sub.ActiveDevices > limit)
+                audit.Add("subscription.over_capacity", "Subscription", sub.Id.ToString(),
+                    details: $"plan={plan.Code} limit={limit} active_devices={sub.ActiveDevices}", tenantId: sub.TenantId);
             return null;
         }, ct);
     }
