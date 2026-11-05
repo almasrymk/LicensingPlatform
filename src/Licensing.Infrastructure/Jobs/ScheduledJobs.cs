@@ -61,6 +61,11 @@ public sealed class JobRunner(IServiceScopeFactory scopes, IOptions<JobsOptions>
         RunAsync("audit-retention", sp => sp.GetRequiredService<AuditQueryService>()
             .PurgeOlderThanAsync(TimeSpan.FromDays(options.Value.AuditRetentionDays), ct), ct);
 
+    /// <summary>E3: repairs device counters that drifted from the activations (expiry, reinstatement, old data, a crash).</summary>
+    public Task<int> ReconcileDeviceCountersAsync(CancellationToken ct) =>
+        RunAsync("device-counter-reconciliation", sp => sp.GetRequiredService<AppDbContext>()
+            .ReconcileDeviceCountersAsync(options.Value.BatchSize, ct), ct);
+
     public Task<int> AggregateUsageAsync(CancellationToken ct) =>
         RunAsync("usage-aggregation", sp => sp.GetRequiredService<ReportService>().AggregateUsageAsync(ct), ct);
 }
@@ -77,6 +82,7 @@ public sealed class ScheduledJobsService(JobRunner jobs, IOptions<JobsOptions> o
         {
             await Safe(jobs.ExpireSubscriptionsAsync, stoppingToken);
             await Safe(jobs.ExpireLicensesAsync, stoppingToken);
+            await Safe(jobs.ReconcileDeviceCountersAsync, stoppingToken);
             await Safe(jobs.AggregateUsageAsync, stoppingToken);
 
             if (DateTimeOffset.UtcNow - lastMaintenance >= TimeSpan.FromMinutes(o.MaintenanceIntervalMinutes))

@@ -151,7 +151,6 @@ public sealed class LicenseService(
         var license = await db.Licenses.FirstOrDefaultAsync(l => l.Id == id, ct);
         if (license is null) return AppErrors.NotFound("License");
         var oldHash = license.ProductKeyHash;
-        var released = license.ActiveActivations;
         var now = clock.GetUtcNow();
         var (plainKey, hash, prefix) = keys.Generate();
         license.RegenerateKey(hash, prefix);
@@ -159,7 +158,7 @@ public sealed class LicenseService(
         activations.ForEach(a => a.Deactivate(now));
         audit.Add("license.key_regenerated", "License", id.ToString(), details: $"prefix={prefix} devices_released={activations.Count}", tenantId: license.TenantId);
         await db.SaveChangesAsync(ct);
-        await db.ReleaseSubscriptionDevicesAsync(id, released, ct);
+        await db.RecountDevicesAsync(id, ct);
         await cache.RemoveAsync(LicenseCacheKeys.For(license.TenantId, oldHash), ct);
         await cache.RemoveAsync(LicenseCacheKeys.For(license.TenantId, hash), ct);
         return new IssuedLicenseDto((await GetAsync(id, ct)).Value.License, plainKey);
@@ -195,16 +194,31 @@ public sealed class LicenseService(
     public Task<Result<LicenseDetailsDto>> ResumeAsync(Guid id, CancellationToken ct, bool byCustomer = false) =>
         MutateAsync(id, byCustomer ? "license.resumed_by_customer" : "license.resumed", l => l.Resume(byCustomer), null, ct);
 
+    /// <summary>
+    /// E3 (R2): revoking ends the license for good, so its seats are deactivated too (their device credentials stop
+    /// working) and the subscription capacity they held is released.
+    /// </summary>
     public Task<Result<LicenseDetailsDto>> RevokeAsync(Guid id, LicenseActionRequest request, CancellationToken ct) =>
-        MutateAsync(id, "license.revoked", l => l.Revoke(request.Reason, clock.GetUtcNow()), request.Reason, ct);
+        MutateAsync(id, "license.revoked", l => l.Revoke(request.Reason, clock.GetUtcNow()), request.Reason, ct, releaseSeats: true);
 
-    private async Task<Result<LicenseDetailsDto>> MutateAsync(Guid id, string action, Action<License> change, string? reason, CancellationToken ct)
+    private async Task<Result<LicenseDetailsDto>> MutateAsync(Guid id, string action, Action<License> change, string? reason, CancellationToken ct,
+        bool releaseSeats = false)
     {
         var license = await db.Licenses.FirstOrDefaultAsync(l => l.Id == id, ct);
         if (license is null) return AppErrors.NotFound("License");
         change(license);
-        audit.Add(action, "License", id.ToString(), details: reason, tenantId: license.TenantId);
+        var released = 0;
+        if (releaseSeats)
+        {
+            var now = clock.GetUtcNow();
+            var seats = await db.LicenseActivations.Where(a => a.LicenseId == id && a.Status == ActivationStatus.Active).ToListAsync(ct);
+            seats.ForEach(a => a.Deactivate(now));
+            released = seats.Count;
+        }
+        audit.Add(action, "License", id.ToString(), details: releaseSeats ? $"{reason} devices_released={released}".Trim() : reason, tenantId: license.TenantId);
         await db.SaveChangesAsync(ct);
+        // The license's status decides whether its devices count against the subscription (E3), so recount on every change.
+        await db.RecountDevicesAsync(id, ct);
         // Invalidate synchronously as well as through the outbox event: a revoked license must fail its next validate.
         await cache.RemoveAsync(LicenseCacheKeys.For(license.TenantId, license.ProductKeyHash), ct);
         return await GetAsync(id, ct);
@@ -223,7 +237,7 @@ public sealed class LicenseService(
         activation.Deactivate(clock.GetUtcNow());
         audit.Add("license.device_reset", "License", licenseId.ToString(), details: $"device={activation.DeviceId}", tenantId: license.TenantId);
         await db.SaveChangesAsync(ct);
-        await db.ReleaseActivationSlotAsync(licenseId, ct);
+        await db.RecountDevicesAsync(licenseId, ct);
         await cache.RemoveAsync(LicenseCacheKeys.For(license.TenantId, license.ProductKeyHash), ct);
         return await GetAsync(licenseId, ct);
     }

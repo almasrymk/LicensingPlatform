@@ -145,11 +145,12 @@ public sealed class DeviceLicensingService(
             details: $"number={license.LicenseNumber} prefix={prefix} device={deviceId} ends={sub.EndDate:O}", tenantId: tenantId);
         if (!await TrySaveOfferAsync(ct)) return LicenseErrors.TrialUsed;
 
-        if (!await db.TryReserveActivationSlotAsync(license.Id, ct))
-            return LicenseErrors.ActivationLimitReached;
-        db.LicenseActivations.Add(LicenseActivation.Create(license, deviceId, request.DeviceName, request.AppVersion, caller.IpAddress, now, request.Os));
-        db.ActivationAttempts.Add(ActivationAttempt.Record(tenantId, license, prefix, deviceId, null, caller.IpAddress, now));
-        await db.SaveChangesAsync(ct);
+        var seated = await SaveNewSeatAsync(license.Id, deviceId, () =>
+        {
+            db.LicenseActivations.Add(LicenseActivation.Create(license, deviceId, request.DeviceName, request.AppVersion, caller.IpAddress, now, request.Os));
+            db.ActivationAttempts.Add(ActivationAttempt.Record(tenantId, license, prefix, deviceId, null, caller.IpAddress, now));
+        }, ct);
+        if (!seated) return LicenseErrors.ActivationLimitReached;
 
         var snapshot = await LoadSnapshotAsync(license, ct);
         var response = await RespondAsync(snapshot!, deviceId, now, alreadyActivated: false, ct);
@@ -167,6 +168,20 @@ public sealed class DeviceLicensingService(
     /// </summary>
     internal static string OfferReference(string markerPrefix, Guid productId, string deviceId) =>
         $"{markerPrefix}{productId:N}:{Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(deviceId))).TrimEnd('=').Replace('+', '-').Replace('/', '_')}";
+
+    /// <summary>
+    /// E3: reserves capacity, adds the seat and saves it in one transaction that holds the subscription lock, then rewrites
+    /// the cached counters. False (and nothing saved) when the license or subscription limit is reached.
+    /// </summary>
+    private Task<bool> SaveNewSeatAsync(Guid licenseId, string deviceId, Action addSeat, CancellationToken ct) =>
+        db.InTransactionAsync(async () =>
+        {
+            if (!await db.TryReserveActivationSlotAsync(licenseId, deviceId, ct)) return false;
+            addSeat();
+            await db.SaveChangesAsync(ct);
+            await db.RecountDevicesAsync(licenseId, ct);
+            return true;
+        }, ct);
 
     private async Task<bool> TrySaveOfferAsync(CancellationToken ct)
     {
@@ -251,11 +266,12 @@ public sealed class DeviceLicensingService(
             details: $"number={license.LicenseNumber} prefix={prefix} device={deviceId} plan={plan.Code}", tenantId: tenantId);
         if (!await TrySaveOfferAsync(ct)) return LicenseErrors.FreeUsed;
 
-        if (!await db.TryReserveActivationSlotAsync(license.Id, ct))
-            return LicenseErrors.ActivationLimitReached;
-        db.LicenseActivations.Add(LicenseActivation.Create(license, deviceId, request.DeviceName, request.AppVersion, caller.IpAddress, now, request.Os));
-        db.ActivationAttempts.Add(ActivationAttempt.Record(tenantId, license, prefix, deviceId, null, caller.IpAddress, now));
-        await db.SaveChangesAsync(ct);
+        var seated = await SaveNewSeatAsync(license.Id, deviceId, () =>
+        {
+            db.LicenseActivations.Add(LicenseActivation.Create(license, deviceId, request.DeviceName, request.AppVersion, caller.IpAddress, now, request.Os));
+            db.ActivationAttempts.Add(ActivationAttempt.Record(tenantId, license, prefix, deviceId, null, caller.IpAddress, now));
+        }, ct);
+        if (!seated) return LicenseErrors.ActivationLimitReached;
 
         var snapshot = await LoadSnapshotAsync(license, ct);
         var response = await RespondAsync(snapshot!, deviceId, now, alreadyActivated: false, ct);
@@ -349,7 +365,7 @@ public sealed class DeviceLicensingService(
         seat.Activation.Deactivate(clock.GetUtcNow());
         audit.Add("license.deactivated", "License", seat.License.Id.ToString(), details: $"device={seat.Activation.DeviceId}", tenantId: seat.License.TenantId);
         await db.SaveChangesAsync(ct);
-        await db.ReleaseActivationSlotAsync(seat.License.Id, ct);
+        await db.RecountDevicesAsync(seat.License.Id, ct);
         await cache.RemoveAsync(LicenseCacheKeys.For(seat.License.TenantId, seat.License.ProductKeyHash), ct);
         return Result.Success();
     }
@@ -404,25 +420,27 @@ public sealed class DeviceLicensingService(
             return await RespondAsync(snapshot!, deviceId, now, alreadyActivated: true, ct);
         }
 
-        if (!await db.TryReserveActivationSlotAsync(license!.Id, ct))
-            return await FailAttemptAsync(tenantId, license, prefix, deviceId, LicenseErrors.ActivationLimitReached, now, ct);
-
         try
         {
-            if (existing is not null)
-                existing.Reactivate(request.DeviceName, request.AppVersion, caller.IpAddress, now, request.Os);
-            else
-                db.LicenseActivations.Add(LicenseActivation.Create(license, deviceId, request.DeviceName, request.AppVersion, caller.IpAddress, now, request.Os));
-            db.ActivationAttempts.Add(ActivationAttempt.Record(tenantId, license, prefix, deviceId, null, caller.IpAddress, now));
-            audit.Add("license.activated", "License", license.Id.ToString(), details: $"device={deviceId}", tenantId: tenantId);
-            await db.SaveChangesAsync(ct);
+            var seated = await SaveNewSeatAsync(license!.Id, deviceId, () =>
+            {
+                if (existing is not null)
+                    existing.Reactivate(request.DeviceName, request.AppVersion, caller.IpAddress, now, request.Os);
+                else
+                    db.LicenseActivations.Add(LicenseActivation.Create(license, deviceId, request.DeviceName, request.AppVersion, caller.IpAddress, now, request.Os));
+                db.ActivationAttempts.Add(ActivationAttempt.Record(tenantId, license, prefix, deviceId, null, caller.IpAddress, now));
+                audit.Add("license.activated", "License", license.Id.ToString(), details: $"device={deviceId}", tenantId: tenantId);
+            }, ct);
+            if (!seated)
+                return await FailAttemptAsync(tenantId, license, prefix, deviceId, LicenseErrors.ActivationLimitReached, now, ct);
         }
         catch (DbUpdateException)
         {
-            // Lost a race with a concurrent activation of the same device (unique LicenseId+DeviceId): give the slot back.
-            await db.ReleaseActivationSlotAsync(license.Id, ct);
+            // Lost a race with a concurrent activation of the same device (unique LicenseId+DeviceId). The transaction
+            // rolled back, so no capacity was taken; answer with the winner's seat.
+            db.DiscardChanges();
             var winner = await db.LicenseActivations.AsNoTracking()
-                .FirstOrDefaultAsync(a => a.LicenseId == license.Id && a.DeviceId == deviceId && a.Status == ActivationStatus.Active, ct);
+                .FirstOrDefaultAsync(a => a.LicenseId == license!.Id && a.DeviceId == deviceId && a.Status == ActivationStatus.Active, ct);
             if (winner is null) throw;
             return await RespondAsync(snapshot!, deviceId, now, alreadyActivated: true, ct);
         }
@@ -514,7 +532,7 @@ public sealed class DeviceLicensingService(
         activation.Deactivate(now);
         audit.Add("license.released", "License", license.Id.ToString(), details: $"device={device}", tenantId: license.TenantId);
         await db.SaveChangesAsync(ct);
-        await db.ReleaseActivationSlotAsync(license.Id, ct);
+        await db.RecountDevicesAsync(license.Id, ct);
         await cache.RemoveAsync(LicenseCacheKeys.For(license.TenantId, license.ProductKeyHash), ct);
         return Result.Success();
     }
@@ -534,7 +552,7 @@ public sealed class DeviceLicensingService(
         activation.Deactivate(now);
         audit.Add("license.deactivated", "License", license.Id.ToString(), details: $"device={deviceId}", tenantId: license.TenantId);
         await db.SaveChangesAsync(ct);
-        await db.ReleaseActivationSlotAsync(license.Id, ct);
+        await db.RecountDevicesAsync(license.Id, ct);
         await cache.RemoveAsync(LicenseCacheKeys.For(license.TenantId, license.ProductKeyHash), ct);
         return Result.Success();
     }

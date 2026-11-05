@@ -40,12 +40,25 @@ public interface IAppDbContext
     /// <summary>Forgets every pending change, after a save lost a race on a unique key.</summary>
     void DiscardChanges();
 
-    /// <summary>Atomically reserves one activation slot. Returns false when the limit is already reached.</summary>
-    Task<bool> TryReserveActivationSlotAsync(Guid licenseId, CancellationToken ct);
+    /// <summary>
+    /// Runs <paramref name="work"/> in one database transaction (or inside the current one), committing when it returns
+    /// and rolling back when it throws.
+    /// </summary>
+    Task<T> InTransactionAsync<T>(Func<Task<T>> work, CancellationToken ct);
 
-    /// <summary>Frees <paramref name="count"/> device slots of the license's subscription (INT-015), after a key regeneration.</summary>
-    Task ReleaseSubscriptionDevicesAsync(Guid licenseId, int count, CancellationToken ct);
-    Task ReleaseActivationSlotAsync(Guid licenseId, CancellationToken ct);
+    /// <summary>
+    /// E3 (R1/R2): decides whether <paramref name="deviceId"/> may take a seat on the license. Must run inside
+    /// <see cref="InTransactionAsync{T}"/> together with the save of the activation: it locks the subscription until the
+    /// transaction ends, so concurrent activations of one subscription cannot exceed its limit. A device already active on
+    /// another license of the subscription needs no new subscription slot. Returns false when a limit is reached.
+    /// </summary>
+    Task<bool> TryReserveActivationSlotAsync(Guid licenseId, string deviceId, CancellationToken ct);
+
+    /// <summary>Recomputes the device counters of the license's subscription (and its licenses) from the activations.</summary>
+    Task RecountDevicesAsync(Guid licenseId, CancellationToken ct);
+
+    /// <summary>Repairs subscriptions whose stored counters disagree with their activations. Returns the rows corrected.</summary>
+    Task<int> ReconcileDeviceCountersAsync(int batchSize, CancellationToken ct);
 }
 
 /// <summary>Who is calling, resolved from the authenticated principal only (never from the request body).</summary>
