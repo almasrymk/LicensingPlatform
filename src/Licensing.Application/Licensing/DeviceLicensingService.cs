@@ -285,14 +285,27 @@ public sealed class DeviceLicensingService(
     /// INT-002 (ADR-001): activation by product key alone, for an Agent without an API client. The key proves ownership;
     /// the tenant is the license's. Same rules as <see cref="ActivateAsync"/>, then a device credential is issued.
     /// </summary>
-    public async Task<Result<DeviceActivationResponse>> ActivateWithKeyAsync(ActivateRequest request, CancellationToken ct)
+    public async Task<Result<DeviceActivationResponse>> ActivateWithKeyAsync(ActivateRequest request, CancellationToken ct, string? currentCredential = null)
     {
         var hash = HashOrNull(request.ProductKey);
         scope.RunAsSystem(null);
-        var owner = hash is null ? null : await db.Licenses.AsNoTracking().Where(l => l.ProductKeyHash == hash).Select(l => (Guid?)l.TenantId).FirstOrDefaultAsync(ct);
+        var owner = hash is null ? null : await db.Licenses.AsNoTracking().Where(l => l.ProductKeyHash == hash).Select(l => new { l.TenantId, l.Id }).FirstOrDefaultAsync(ct);
         // An unknown key gets the same answer as any other invalid license, and no tenant to record the attempt in.
-        if (owner is not { } tenantId) return LicenseErrors.InvalidLicense;
+        if (owner is null) return LicenseErrors.InvalidLicense;
+        var tenantId = owner.TenantId;
         scope.RunAsSystem(tenantId);
+
+        // E7: activating a seat that already has a credential replaces it only for the holder of that credential.
+        // Otherwise anyone who learned the key and a device id could take the device's licensing over.
+        var held = await db.LicenseActivations.AsNoTracking()
+            .Where(a => a.LicenseId == owner.Id && a.DeviceId == (request.DeviceId ?? "").Trim() && a.Status == ActivationStatus.Active && a.CredentialHash != null)
+            .Select(a => a.CredentialHash).FirstOrDefaultAsync(ct);
+        if (held is not null && !Matches(held, currentCredential) && await RulesPassAsync(owner.Id, request.ProductCode, ct))
+        {
+            audit.Add("license.device_credential_refused", "License", owner.Id.ToString(), false, $"device={request.DeviceId?.Trim()} reason=credential-exists", tenantId);
+            await db.SaveChangesAsync(ct);
+            return LicenseErrors.DeviceCredentialExists;
+        }
 
         var activated = await ActivateCoreAsync(tenantId, request, ct);
         if (activated.IsFailure) return activated.Error!;
@@ -327,6 +340,13 @@ public sealed class DeviceLicensingService(
         if (CheckRules(snapshot, request.ProductCode, now) is { } error) return error;
         var activation = await db.LicenseActivations.FirstOrDefaultAsync(a => a.LicenseId == license.Id && a.DeviceId == deviceId && a.Status == ActivationStatus.Active, ct);
         if (activation is null) return LicenseErrors.DeviceNotActivated;
+        // E7: claim is the one-time move from an API client to a credential. A seat that has a credential keeps it.
+        if (activation.CredentialHash is not null)
+        {
+            audit.Add("license.device_credential_refused", "License", license.Id.ToString(), false, $"device={deviceId} reason=claim-credential-exists", license.TenantId);
+            await db.SaveChangesAsync(ct);
+            return LicenseErrors.DeviceCredentialExists;
+        }
 
         activation.Heartbeat(request.AppVersion, caller.IpAddress, now, request.Os);
         var credential = CredentialPrefix + secrets.GenerateToken(32);
@@ -354,6 +374,44 @@ public sealed class DeviceLicensingService(
         }
 
         return await RespondAsync(snapshot, seat.Activation.DeviceId, now, false, ct);
+    }
+
+    /// <summary>
+    /// E7: the device replaces its own credential, proving it holds the current one. The old credential stops working at
+    /// once. The answer has the same shape as activate.
+    /// </summary>
+    public async Task<Result<DeviceActivationResponse>> RotateCredentialAsync(DeviceCheckRequest request, string? credential, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var found = await FindCredentialSeatAsync(request.LicenseId, request.DeviceId, credential, ct);
+        if (found is not { } seat) return LicenseErrors.DeviceNotActivated;
+
+        var snapshot = await LoadSnapshotAsync(seat.License, ct);
+        if (snapshot is null) return LicenseErrors.InvalidLicense;
+        if (CheckRules(snapshot, null, now) is { } error) return error;
+
+        seat.Activation.Heartbeat(request.AppVersion, caller.IpAddress, now, request.Os);
+        var replacement = CredentialPrefix + secrets.GenerateToken(32);
+        seat.Activation.IssueCredential(secrets.Hash(replacement));
+        audit.Add("license.device_credential_rotated", "License", seat.License.Id.ToString(), details: $"device={seat.Activation.DeviceId}", tenantId: seat.License.TenantId);
+        await db.SaveChangesAsync(ct);
+        var answer = await RespondAsync(snapshot, seat.Activation.DeviceId, now, true, ct);
+        return answer.IsSuccess ? new DeviceActivationResponse(answer.Value, replacement) : answer.Error!;
+    }
+
+    /// <summary>A key that fails the license rules answers with that rule's error (and the attempt is recorded) first.</summary>
+    private async Task<bool> RulesPassAsync(Guid licenseId, string? productCode, CancellationToken ct)
+    {
+        var license = await db.Licenses.AsNoTracking().FirstOrDefaultAsync(l => l.Id == licenseId, ct);
+        var snapshot = license is null ? null : await LoadSnapshotAsync(license, ct);
+        return snapshot is not null && CheckRules(snapshot, productCode, clock.GetUtcNow()) is null;
+    }
+
+    private bool Matches(string expectedHash, string? credential)
+    {
+        if (string.IsNullOrWhiteSpace(credential) || credential.Length > 200 || !credential.StartsWith(CredentialPrefix, StringComparison.Ordinal)) return false;
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(expectedHash), System.Text.Encoding.UTF8.GetBytes(secrets.Hash(credential)));
     }
 
     /// <summary>INT-002: the device gives its own seat back.</summary>

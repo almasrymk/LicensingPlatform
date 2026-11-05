@@ -71,9 +71,11 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
 
 builder.Services.AddHealthChecks()
     .AddCheck("self", () => HealthCheckResult.Healthy(), tags: ["live"])
-    .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
+    .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"])
+    .AddCheck<ProductionReadinessHealthCheck>("production-configuration", tags: ["ready"]);
 
 var app = builder.Build();
+ProductionReadiness.Verify(app.Configuration, app.Environment, app.Logger);
 
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<SecurityHeadersMiddleware>();

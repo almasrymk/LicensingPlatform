@@ -69,10 +69,13 @@ public sealed class DeviceCredentialTests : IClassFixture<TestAppFixture>
         var issued = await _setup.IssueAsync();
         var anonymous = _app.Anonymous();
         var (_, first) = await ActivateAsync(anonymous, issued, "CRED-DEVICE-0002");
-        var (again, second) = await ActivateAsync(anonymous, issued, "CRED-DEVICE-0002");
         var check = new { licenseId = issued.LicenseId, deviceId = "CRED-DEVICE-0002" };
+        // E7: activating again replaces the credential only for its holder.
+        var again = await (await PostAsync(anonymous, "/api/v1/licensing/device/activate",
+            new { productKey = issued.Key, deviceId = "CRED-DEVICE-0002", productCode = issued.ProductCode }, first)).OkJsonAsync();
+        var second = again.GetProperty("deviceCredential").GetString()!;
 
-        Assert.True(again.GetProperty("alreadyActivated").GetBoolean());
+        Assert.True(again.GetProperty("license").GetProperty("alreadyActivated").GetBoolean());
         Assert.NotEqual(first, second);
         foreach (var credential in new[] { first, null, "lcd_" + new string('A', 43), second + "x" })
             Assert.Equal("LIC_DEVICE_NOT_ACTIVATED", await (await PostAsync(anonymous, "/api/v1/licensing/device/validate", check, credential)).ErrorCodeAsync());
@@ -133,6 +136,70 @@ public sealed class DeviceCredentialTests : IClassFixture<TestAppFixture>
         Assert.Equal(1, claimed.GetProperty("license").GetProperty("activeActivations").GetInt32());
         await (await PostAsync(anonymous, "/api/v1/licensing/device/heartbeat", new { licenseId = issued.LicenseId, deviceId = "CRED-CLAIM-DEV-01" }, credential)).OkJsonAsync();
         Assert.Equal(1, await _app.WithDbAsync(db => db.Licenses.IgnoreQueryFilters().Where(l => l.Id == issued.LicenseId).Select(l => l.ActiveActivations).FirstAsync()));
+    }
+
+    [Fact]
+    public async Task A_product_key_and_device_id_alone_cannot_take_over_a_device_credential()
+    {
+        // E7: the key is shared inside the customer's company and device ids are not secret. Neither activate nor claim may
+        // replace the credential of a device that has one, or the real device would be locked out.
+        var issued = await _setup.IssueAsync();
+        var anonymous = _app.Anonymous();
+        var (_, credential) = await ActivateAsync(anonymous, issued, "CRED-TAKEOVER-01");
+
+        var activate = await anonymous.PostJsonAsync("/api/v1/licensing/device/activate",
+            new { productKey = issued.Key, deviceId = "CRED-TAKEOVER-01", productCode = issued.ProductCode });
+        var wrongProof = await PostAsync(anonymous, "/api/v1/licensing/device/activate",
+            new { productKey = issued.Key, deviceId = "CRED-TAKEOVER-01", productCode = issued.ProductCode }, "lcd_" + new string('C', 43));
+        var claim = await anonymous.PostJsonAsync("/api/v1/licensing/device/claim", new { productKey = issued.Key, deviceId = "CRED-TAKEOVER-01" });
+
+        Assert.Equal("LIC_DEVICE_CREDENTIAL_EXISTS", await activate.ErrorCodeAsync());
+        Assert.Equal("LIC_DEVICE_CREDENTIAL_EXISTS", await wrongProof.ErrorCodeAsync());
+        Assert.Equal("LIC_DEVICE_CREDENTIAL_EXISTS", await claim.ErrorCodeAsync());
+        Assert.Equal(HttpStatusCode.Conflict, claim.StatusCode);
+        await (await PostAsync(anonymous, "/api/v1/licensing/device/validate", new { licenseId = issued.LicenseId, deviceId = "CRED-TAKEOVER-01" }, credential)).OkJsonAsync();
+        Assert.True(await _app.WithDbAsync(db => db.AuditRecords.IgnoreQueryFilters()
+            .AnyAsync(a => a.Action == "license.device_credential_refused" && a.EntityId == issued.LicenseId.ToString())));
+    }
+
+    [Fact]
+    public async Task A_device_rotates_its_own_credential_and_the_old_one_stops_working()
+    {
+        var issued = await _setup.IssueAsync();
+        var anonymous = _app.Anonymous();
+        var (_, old) = await ActivateAsync(anonymous, issued, "CRED-ROTATE-001");
+        var check = new { licenseId = issued.LicenseId, deviceId = "CRED-ROTATE-001", appVersion = "1.0.2" };
+
+        var rotated = await (await PostAsync(anonymous, "/api/v1/licensing/device/rotate", check, old)).OkJsonAsync();
+        var replacement = rotated.GetProperty("deviceCredential").GetString()!;
+
+        Assert.NotEqual(old, replacement);
+        Assert.Equal("LIC_DEVICE_NOT_ACTIVATED", await (await PostAsync(anonymous, "/api/v1/licensing/device/validate", check, old)).ErrorCodeAsync());
+        Assert.Equal("LIC_DEVICE_NOT_ACTIVATED", await (await PostAsync(anonymous, "/api/v1/licensing/device/rotate", check, old)).ErrorCodeAsync());
+        Assert.Equal("LIC_DEVICE_NOT_ACTIVATED", await (await PostAsync(anonymous, "/api/v1/licensing/device/rotate", check, null)).ErrorCodeAsync());
+        await (await PostAsync(anonymous, "/api/v1/licensing/device/heartbeat", check, replacement)).OkJsonAsync();
+        Assert.Equal(1, await _app.WithDbAsync(db => db.Licenses.IgnoreQueryFilters().Where(l => l.Id == issued.LicenseId).Select(l => l.ActiveActivations).FirstAsync()));
+    }
+
+    [Fact]
+    public async Task After_the_owner_resets_a_device_it_can_activate_again_and_gets_a_new_credential()
+    {
+        // E7 recovery: a reinstalled Agent lost its credential. The license owner resets the device (frees the seat and
+        // drops the credential); then the product key activates it again.
+        var issued = await _setup.IssueAsync(maxActivations: 1);
+        var anonymous = _app.Anonymous();
+        var (_, old) = await ActivateAsync(anonymous, issued, "CRED-RECOVER-01");
+        var activationId = await _app.WithDbAsync(db => db.LicenseActivations.IgnoreQueryFilters()
+            .Where(a => a.LicenseId == issued.LicenseId && a.DeviceId == "CRED-RECOVER-01").Select(a => a.Id).SingleAsync());
+
+        var reset = await issued.Admin.PostJsonAsync($"/api/v1/licenses/{issued.LicenseId}/activations/{activationId}/reset", new { });
+        Assert.True(reset.IsSuccessStatusCode, $"{(int)reset.StatusCode}");
+        var (_, fresh) = await ActivateAsync(anonymous, issued, "CRED-RECOVER-01");
+
+        Assert.NotEqual(old, fresh);
+        var check = new { licenseId = issued.LicenseId, deviceId = "CRED-RECOVER-01" };
+        Assert.Equal("LIC_DEVICE_NOT_ACTIVATED", await (await PostAsync(anonymous, "/api/v1/licensing/device/validate", check, old)).ErrorCodeAsync());
+        await (await PostAsync(anonymous, "/api/v1/licensing/device/validate", check, fresh)).OkJsonAsync();
     }
 
     [Fact]

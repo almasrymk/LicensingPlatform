@@ -19,6 +19,12 @@ public static class LicenseErrors
     public static readonly Error SubscriptionInactive = Error.Forbidden("LIC_SUBSCRIPTION_INACTIVE", "The subscription for this license is not active.");
     public static readonly Error ActivationLimitReached = Error.Conflict("LIC_ACTIVATION_LIMIT_REACHED", "The maximum number of activations has been reached.");
     public static readonly Error DeviceNotActivated = Error.NotFound("LIC_DEVICE_NOT_ACTIVATED", "This device is not activated for the license.");
+    /// <summary>
+    /// E7: the seat already has a device credential. A new one is issued only to the holder of the current one (rotate,
+    /// or activate with it), or after the license owner resets the device. A product key and a device id are not enough.
+    /// </summary>
+    public static readonly Error DeviceCredentialExists = Error.Conflict("LIC_DEVICE_CREDENTIAL_EXISTS",
+        "This device already has a credential. Use the current one, or ask the license owner to reset the device.");
     public static readonly Error InvalidDevice = Error.Validation("LIC_INVALID_DEVICE", "Device id must be 8-128 characters of letters, digits, '-', '_', ':' or '.'.");
     public static readonly Error InvalidTransition = Error.Conflict("LIC_INVALID_TRANSITION", "This action is not allowed in the license's current state.");
     public static readonly Error TrialUnavailable = Error.NotFound("LIC_TRIAL_UNAVAILABLE", "This product has no published plan with trial days.");

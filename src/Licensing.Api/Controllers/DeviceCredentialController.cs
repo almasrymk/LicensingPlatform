@@ -22,18 +22,28 @@ public sealed class DeviceCredentialController(DeviceLicensingService licensing)
 
     /// <summary>
     /// Activates this device with a product key and returns <c>{ license, deviceCredential }</c>. The credential is
-    /// shown only here. Activating the same device again returns a new credential and invalidates the previous one.
+    /// shown only here. E7: activating a device that already has a credential needs that credential in the header (it is
+    /// then replaced); without it the answer is <c>LIC_DEVICE_CREDENTIAL_EXISTS</c> and the license owner resets the device.
     /// </summary>
     [HttpPost("activate")]
-    public async Task<IActionResult> Activate(ActivateRequest request, CancellationToken ct)
+    public async Task<IActionResult> Activate(ActivateRequest request, [FromHeader(Name = CredentialHeader)] string? credential, CancellationToken ct)
     {
         Response.Headers.CacheControl = "no-store";
-        return this.ToActionResult(await licensing.ActivateWithKeyAsync(request, ct));
+        return this.ToActionResult(await licensing.ActivateWithKeyAsync(request, ct, credential));
+    }
+
+    /// <summary>E7: replaces this device's credential. Needs the current one; the old one stops working at once.</summary>
+    [HttpPost("rotate")]
+    public async Task<IActionResult> Rotate(DeviceCheckRequest request, [FromHeader(Name = CredentialHeader)] string? credential, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        return this.ToActionResult(await licensing.RotateCredentialAsync(request, credential, ct));
     }
 
     /// <summary>
     /// For an installation already activated through an API client: returns a credential for the seat it holds, without
-    /// taking a new slot. <c>LIC_DEVICE_NOT_ACTIVATED</c> when the device has no active seat.
+    /// taking a new slot. <c>LIC_DEVICE_NOT_ACTIVATED</c> when the device has no active seat; E7:
+    /// <c>LIC_DEVICE_CREDENTIAL_EXISTS</c> when the seat already has a credential (claim works once per seat).
     /// </summary>
     [HttpPost("claim")]
     public async Task<IActionResult> Claim(ValidateRequest request, CancellationToken ct)

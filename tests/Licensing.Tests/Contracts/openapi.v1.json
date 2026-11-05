@@ -3346,7 +3346,16 @@
         "tags": [
           "Licensing (device credential)"
         ],
-        "summary": "Activates this device with a product key and returns \u0060{ license, deviceCredential }\u0060. The credential is\nshown only here. Activating the same device again returns a new credential and invalidates the previous one.",
+        "summary": "Activates this device with a product key and returns \u0060{ license, deviceCredential }\u0060. The credential is\nshown only here. E7: activating a device that already has a credential needs that credential in the header (it is\nthen replaced); without it the answer is \u0060LIC_DEVICE_CREDENTIAL_EXISTS\u0060 and the license owner resets the device.",
+        "parameters": [
+          {
+            "name": "X-Device-Credential",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3374,12 +3383,54 @@
         }
       }
     },
+    "/api/v1/licensing/device/rotate": {
+      "post": {
+        "tags": [
+          "Licensing (device credential)"
+        ],
+        "summary": "E7: replaces this device\u0027s credential. Needs the current one; the old one stops working at once.",
+        "parameters": [
+          {
+            "name": "X-Device-Credential",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/licensing/device/claim": {
       "post": {
         "tags": [
           "Licensing (device credential)"
         ],
-        "summary": "For an installation already activated through an API client: returns a credential for the seat it holds, without\ntaking a new slot. \u0060LIC_DEVICE_NOT_ACTIVATED\u0060 when the device has no active seat.",
+        "summary": "For an installation already activated through an API client: returns a credential for the seat it holds, without\ntaking a new slot. \u0060LIC_DEVICE_NOT_ACTIVATED\u0060 when the device has no active seat; E7:\n\u0060LIC_DEVICE_CREDENTIAL_EXISTS\u0060 when the seat already has a credential (claim works once per seat).",
         "requestBody": {
           "content": {
             "application/json": {
