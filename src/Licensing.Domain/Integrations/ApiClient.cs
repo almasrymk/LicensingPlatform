@@ -17,11 +17,13 @@ public static class ApiScopes
     public const string SubscriptionsRead = "subscriptions.read";
     public const string SubscriptionsManage = "subscriptions.manage";
     public const string CatalogRead = "catalog.read";
+    /// <summary>B5: issue single-use trial codes to the website's signed-in customers (see <c>TrialGrant</c>).</summary>
+    public const string TrialsGrant = "trials.grant";
 
     public static readonly string[] All =
     [
         LicensesActivate, LicensesValidate, LicensesIssue, LicensesRead, LicensesManage,
-        CustomersRead, CustomersManage, SubscriptionsRead, SubscriptionsManage, CatalogRead,
+        CustomersRead, CustomersManage, SubscriptionsRead, SubscriptionsManage, CatalogRead, TrialsGrant,
     ];
 
     /// <summary>

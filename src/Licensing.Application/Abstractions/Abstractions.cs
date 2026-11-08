@@ -28,6 +28,7 @@ public interface IAppDbContext
     DbSet<License> Licenses { get; }
     DbSet<LicenseActivation> LicenseActivations { get; }
     DbSet<ActivationAttempt> ActivationAttempts { get; }
+    DbSet<TrialGrant> TrialGrants { get; }
     DbSet<SigningKey> SigningKeys { get; }
     DbSet<ApiClient> ApiClients { get; }
     DbSet<Webhook> Webhooks { get; }

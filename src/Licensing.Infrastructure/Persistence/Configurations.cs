@@ -202,6 +202,20 @@ internal sealed class ActivationAttemptConfig : IEntityTypeConfiguration<Activat
     }
 }
 
+internal sealed class TrialGrantConfig : IEntityTypeConfiguration<TrialGrant>
+{
+    public void Configure(EntityTypeBuilder<TrialGrant> b)
+    {
+        b.ToTable("TrialGrants", "licensing");
+        b.HasIndex(x => x.CodeHash).IsUnique();
+        b.HasIndex(x => new { x.TenantId, x.ProductId, x.Reference });
+        b.Property(x => x.CodeHash).HasMaxLength(128);
+        b.Property(x => x.Reference).HasMaxLength(TrialGrant.ReferenceMaxLength);
+        b.Property(x => x.RedeemedDeviceId).HasMaxLength(128);
+        b.HasOne<Product>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
 internal sealed class SigningKeyConfig : IEntityTypeConfiguration<SigningKey>
 {
     public void Configure(EntityTypeBuilder<SigningKey> b)

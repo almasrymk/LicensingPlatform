@@ -30,7 +30,22 @@ public sealed class DeviceOfferOptions
 {
     public const string Section = "DeviceOffers";
     public int PerIpPerDay { get; set; } = 10;
+
+    /// <summary>B5: how long a trial code from the website stays usable (1 to 168 hours).</summary>
+    public int TrialGrantHours { get; set; } = 24;
 }
+
+/// <summary>B5: the website asks for a trial code for one of its signed-in customers (<c>Reference</c>, one trial each).</summary>
+public sealed record IssueTrialGrantRequest(string? ProductCode, string? Reference);
+
+/// <summary>The trial code (shown once), when it stops working and how long the trial will run.</summary>
+public sealed record TrialGrantResponse(string TrialCode, DateTimeOffset ExpiresAt, string ProductCode, int TrialDays);
+
+/// <summary>B5: an Agent with no API client starts its trial with the code the customer got on the website.</summary>
+public sealed record DeviceTrialRequest(string? TrialCode, string? DeviceId, string? DeviceName, string? ProductCode, string? AppVersion, string? Os = null);
+
+/// <summary>The trial's product key and device credential (both shown once) and the activation result.</summary>
+public sealed record DeviceTrialResponse(string ProductKey, LicenseCheckResponse License, int TrialDays, string DeviceCredential);
 
 public sealed record TrialRequest(string DeviceId, string? DeviceName, string? ProductCode, string? AppVersion, string? Os = null);
 
@@ -92,10 +107,107 @@ public sealed class DeviceLicensingService(
     /// license for one device that ends with the trial, and this device's activation. A device that already had a trial
     /// gets <see cref="LicenseErrors.TrialUsed"/>; the product key is returned only here, once.
     /// </summary>
-    public async Task<Result<TrialResponse>> StartTrialAsync(TrialRequest request, CancellationToken ct)
+    public Task<Result<TrialResponse>> StartTrialAsync(TrialRequest request, CancellationToken ct) =>
+        StartTrialCoreAsync(caller.TenantId!.Value, request, ct);
+
+    private async Task<(Guid ProductId, int TrialDays)?> TrialOfferAsync(Guid tenantId, string? productCode, CancellationToken ct)
+    {
+        var code = productCode?.Trim() ?? "";
+        var product = code.Length == 0 ? null
+            : await db.Products.FirstOrDefaultAsync(p => p.TenantId == tenantId && p.Code == code && p.IsActive, ct);
+        var plan = product is null ? null : await CurrentOfferAsync(tenantId, product.Id, PlanKind.Trial, ct) ?? await db.Plans
+            .Where(p => p.TenantId == tenantId && p.ProductId == product.Id && p.Status == PlanStatus.Published && p.TrialDays > 0
+                && p.Kind != PlanKind.Free)
+            .OrderBy(p => p.Code).FirstOrDefaultAsync(ct);
+        return product is null || plan?.TrialDays is null ? null : (product.Id, plan.TrialDays.Value);
+    }
+
+    /// <summary>
+    /// B5: a single-use trial code for one website customer. The website calls this with its API client (scope
+    /// <c>trials.grant</c>) after the customer signs in, and shows the code once. An unused earlier code for the same
+    /// reference is cancelled; a reference whose code was already redeemed gets <c>LIC_TRIAL_GRANT_USED</c>.
+    /// </summary>
+    public async Task<Result<TrialGrantResponse>> IssueTrialGrantAsync(IssueTrialGrantRequest request, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
         var tenantId = caller.TenantId!.Value;
+        var reference = request.Reference?.Trim() ?? "";
+        if (reference.Length is 0 or > TrialGrant.ReferenceMaxLength)
+            return Error.Validation("VALIDATION_FAILED", $"Reference is required and at most {TrialGrant.ReferenceMaxLength} characters.");
+        if (await TrialOfferAsync(tenantId, request.ProductCode, ct) is not { } offer) return LicenseErrors.TrialUnavailable;
+
+        var earlier = await db.TrialGrants.Where(g => g.TenantId == tenantId && g.ProductId == offer.ProductId && g.Reference == reference).ToListAsync(ct);
+        if (earlier.Any(g => g.RedeemedAt is not null))
+        {
+            audit.Add("license.trial_grant_refused", "Product", offer.ProductId.ToString(), false, $"reference={reference} reason=used", tenantId);
+            await db.SaveChangesAsync(ct);
+            return TrialGrantErrors.AlreadyUsed;
+        }
+        foreach (var open in earlier) open.Cancel(now);
+
+        var code = TrialGrant.CodePrefix + secrets.GenerateToken(32);
+        var hours = Math.Clamp(_offers.TrialGrantHours, 1, 168);
+        var grant = TrialGrant.Issue(tenantId, offer.ProductId, reference, secrets.Hash(code), now, TimeSpan.FromHours(hours));
+        db.TrialGrants.Add(grant);
+        audit.Add("license.trial_grant_issued", "TrialGrant", grant.Id.ToString(), details: $"reference={reference} expires={grant.ExpiresAt:O}", tenantId: tenantId);
+        await db.SaveChangesAsync(ct);
+        return new TrialGrantResponse(code, grant.ExpiresAt, request.ProductCode!.Trim(), offer.TrialDays);
+    }
+
+    /// <summary>
+    /// B5: anonymous trial start for an Agent with no API client. The single-use code from the website names the tenant and
+    /// product; the device then gets its one trial exactly as with <see cref="StartTrialAsync"/> (one per device, address
+    /// limit) and a device credential like <see cref="ActivateWithKeyAsync"/>. Unknown, expired, used, cancelled and
+    /// other-product codes all answer <c>LIC_TRIAL_GRANT_INVALID</c>. A refused trial leaves the code usable.
+    /// </summary>
+    public async Task<Result<DeviceTrialResponse>> StartTrialWithGrantAsync(DeviceTrialRequest request, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var deviceId = request.DeviceId?.Trim() ?? "";
+        if (!LicenseActivation.IsValidDeviceId(deviceId)) return LicenseErrors.InvalidDevice;
+        var hash = string.IsNullOrWhiteSpace(request.TrialCode) || !request.TrialCode.Trim().StartsWith(TrialGrant.CodePrefix, StringComparison.Ordinal)
+            ? null : secrets.Hash(request.TrialCode.Trim());
+        scope.RunAsSystem(null);
+        var grant = hash is null ? null : await db.TrialGrants.AsNoTracking().FirstOrDefaultAsync(g => g.CodeHash == hash, ct);
+        if (grant is null || !grant.IsOpen(now)) return TrialGrantErrors.Invalid;
+        var tenantId = grant.TenantId;
+        scope.RunAsSystem(tenantId);
+        var productCode = request.ProductCode?.Trim() ?? "";
+        if (!await db.Products.AnyAsync(p => p.Id == grant.ProductId && p.Code == productCode, ct))
+        {
+            audit.Add("license.trial_grant_refused", "TrialGrant", grant.Id.ToString(), false, $"device={deviceId} reason=product", tenantId);
+            await db.SaveChangesAsync(ct);
+            return TrialGrantErrors.Invalid;
+        }
+
+        // Claim the code first, atomically, so two devices racing with one code cannot both start a trial.
+        var claimed = await db.TrialGrants
+            .Where(g => g.Id == grant.Id && g.RedeemedAt == null && g.CancelledAt == null && g.ExpiresAt > now)
+            .ExecuteUpdateAsync(u => u.SetProperty(g => g.RedeemedAt, now).SetProperty(g => g.RedeemedDeviceId, deviceId), ct);
+        if (claimed == 0) return TrialGrantErrors.Invalid;
+
+        var started = await StartTrialCoreAsync(tenantId, new TrialRequest(deviceId, request.DeviceName, productCode, request.AppVersion, request.Os), ct);
+        if (started.IsFailure)
+        {
+            await db.TrialGrants.Where(g => g.Id == grant.Id)
+                .ExecuteUpdateAsync(u => u.SetProperty(g => g.RedeemedAt, (DateTimeOffset?)null).SetProperty(g => g.RedeemedDeviceId, (string?)null), ct);
+            return started.Error!;
+        }
+
+        var licenseId = started.Value.License.LicenseId;
+        var activation = await db.LicenseActivations.FirstAsync(a => a.LicenseId == licenseId && a.DeviceId == deviceId && a.Status == ActivationStatus.Active, ct);
+        var credential = CredentialPrefix + secrets.GenerateToken(32);
+        activation.IssueCredential(secrets.Hash(credential));
+        audit.Add("license.trial_grant_redeemed", "TrialGrant", grant.Id.ToString(), details: $"device={deviceId} license={licenseId}", tenantId: tenantId);
+        audit.Add("license.device_credential_issued", "License", licenseId.ToString(), details: $"device={deviceId} trial=true", tenantId: tenantId);
+        await db.SaveChangesAsync(ct);
+        await db.TrialGrants.Where(g => g.Id == grant.Id).ExecuteUpdateAsync(u => u.SetProperty(g => g.LicenseId, licenseId), ct);
+        return new DeviceTrialResponse(started.Value.ProductKey, started.Value.License, started.Value.TrialDays, credential);
+    }
+
+    private async Task<Result<TrialResponse>> StartTrialCoreAsync(Guid tenantId, TrialRequest request, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
         var deviceId = request.DeviceId?.Trim() ?? "";
         if (!LicenseActivation.IsValidDeviceId(deviceId)) return LicenseErrors.InvalidDevice;
 

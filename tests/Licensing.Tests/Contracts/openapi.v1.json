@@ -3383,6 +3383,39 @@
         }
       }
     },
+    "/api/v1/licensing/device/trial": {
+      "post": {
+        "tags": [
+          "Licensing (device credential)"
+        ],
+        "summary": "B5: starts this device\u0027s one trial with the single-use code the customer got on the website, and returns\n\u0060{ productKey, license, trialDays, deviceCredential }\u0060 (key and credential shown only here). No shared secret.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceTrialRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceTrialRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceTrialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/licensing/device/rotate": {
       "post": {
         "tags": [
@@ -4412,6 +4445,39 @@
             "application/*\u002Bjson": {
               "schema": {
                 "$ref": "#/components/schemas/TrialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/licensing/trial-grants": {
+      "post": {
+        "tags": [
+          "Licensing (devices)"
+        ],
+        "summary": "B5: a single-use trial code for one of the website\u0027s signed-in customers (\u0060reference\u0060, one trial each). The\ncustomer enters it in the Agent, which redeems it on \u0060device/trial\u0060 without an API client. Shown only once.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueTrialGrantRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueTrialGrantRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueTrialGrantRequest"
               }
             }
           },
@@ -5704,6 +5770,54 @@
           }
         }
       },
+      "DeviceTrialRequest": {
+        "required": [
+          "trialCode",
+          "deviceId",
+          "deviceName",
+          "productCode",
+          "appVersion"
+        ],
+        "type": "object",
+        "properties": {
+          "trialCode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "deviceId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "deviceName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "productCode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "appVersion": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "os": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "ExpiringLicenseDto": {
         "required": [
           "licenseId",
@@ -5991,6 +6105,27 @@
           "subscriptionId": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "IssueTrialGrantRequest": {
+        "required": [
+          "productCode",
+          "reference"
+        ],
+        "type": "object",
+        "properties": {
+          "productCode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reference": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

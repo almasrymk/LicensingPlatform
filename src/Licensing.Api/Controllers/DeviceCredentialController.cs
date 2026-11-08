@@ -32,6 +32,17 @@ public sealed class DeviceCredentialController(DeviceLicensingService licensing)
         return this.ToActionResult(await licensing.ActivateWithKeyAsync(request, ct, credential));
     }
 
+    /// <summary>
+    /// B5: starts this device's one trial with the single-use code the customer got on the website, and returns
+    /// <c>{ productKey, license, trialDays, deviceCredential }</c> (key and credential shown only here). No shared secret.
+    /// </summary>
+    [HttpPost("trial")]
+    public async Task<IActionResult> Trial(DeviceTrialRequest request, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        return this.ToActionResult(await licensing.StartTrialWithGrantAsync(request, ct));
+    }
+
     /// <summary>E7: replaces this device's credential. Needs the current one; the old one stops working at once.</summary>
     [HttpPost("rotate")]
     public async Task<IActionResult> Rotate(DeviceCheckRequest request, [FromHeader(Name = CredentialHeader)] string? credential, CancellationToken ct)

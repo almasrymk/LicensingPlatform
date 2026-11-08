@@ -35,6 +35,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<License> Licenses => Set<License>();
     public DbSet<LicenseActivation> LicenseActivations => Set<LicenseActivation>();
     public DbSet<ActivationAttempt> ActivationAttempts => Set<ActivationAttempt>();
+    public DbSet<TrialGrant> TrialGrants => Set<TrialGrant>();
     public DbSet<SigningKey> SigningKeys => Set<SigningKey>();
     public DbSet<ApiClient> ApiClients => Set<ApiClient>();
     public DbSet<Webhook> Webhooks => Set<Webhook>();
