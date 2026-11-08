@@ -6,7 +6,8 @@ namespace Licensing.Application.Integrations;
 /// One entry of the integration change feed (INT-006, ADR-002). Only ids and the event type leave the platform;
 /// the stored payload (which may hold a product key hash) is never returned.
 /// </summary>
-public sealed record ChangeFeedItem(Guid Id, string Type, DateTimeOffset OccurredAt, Guid? CustomerId, Guid? SubscriptionId, Guid? LicenseId);
+/// <param name="DeviceId">INT-024: the Licensing device id, on <c>LicenseActivationResetV1</c> only.</param>
+public sealed record ChangeFeedItem(Guid Id, string Type, DateTimeOffset OccurredAt, Guid? CustomerId, Guid? SubscriptionId, Guid? LicenseId, string? DeviceId = null);
 
 /// <summary><paramref name="NextCursor"/> is opaque; pass it back unchanged. Null only when the page is empty and no cursor was given.</summary>
 public sealed record ChangeFeedPage(IReadOnlyList<ChangeFeedItem> Items, string? NextCursor, bool HasMore);

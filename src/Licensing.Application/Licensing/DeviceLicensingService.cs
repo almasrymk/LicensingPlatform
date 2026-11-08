@@ -537,6 +537,7 @@ public sealed class DeviceLicensingService(
         if (found is not { } seat) return LicenseErrors.DeviceNotActivated;
 
         seat.Activation.Deactivate(clock.GetUtcNow());
+        seat.License.ActivationReset(seat.Activation.DeviceId, "deactivated");
         audit.Add("license.deactivated", "License", seat.License.Id.ToString(), details: $"device={seat.Activation.DeviceId}", tenantId: seat.License.TenantId);
         await db.SaveChangesAsync(ct);
         await db.RecountDevicesAsync(seat.License.Id, ct);
@@ -724,6 +725,7 @@ public sealed class DeviceLicensingService(
         if (activation is null) return LicenseErrors.DeviceNotActivated;
 
         activation.Deactivate(now);
+        license.ActivationReset(deviceId, "deactivated");
         audit.Add("license.deactivated", "License", license.Id.ToString(), details: $"device={deviceId}", tenantId: license.TenantId);
         await db.SaveChangesAsync(ct);
         await db.RecountDevicesAsync(license.Id, ct);

@@ -62,7 +62,7 @@ public sealed class ChangeFeedReader(AppDbContext db, IOptions<ChangeFeedOptions
         var customers = await ResolveCustomersAsync(parsed.Select(p => p.Ids).ToList(), ct);
         var items = parsed.Select(p => new ChangeFeedItem(p.Id, p.Type, p.OccurredAt,
             p.Ids.Customer ?? Lookup(customers.BySubscription, p.Ids.Subscription) ?? Lookup(customers.ByLicense, p.Ids.License),
-            p.Ids.Subscription ?? Lookup(customers.SubscriptionOfLicense, p.Ids.License), p.Ids.License)).ToList();
+            p.Ids.Subscription ?? Lookup(customers.SubscriptionOfLicense, p.Ids.License), p.Ids.License, p.Ids.Device)).ToList();
 
         string? next;
         if (rows.Count == 0)
@@ -96,14 +96,16 @@ public sealed class ChangeFeedReader(AppDbContext db, IOptions<ChangeFeedOptions
         return new Resolved(bySubscription, licenses.ToDictionary(l => l.Id, l => l.CustomerId), licenses.ToDictionary(l => l.Id, l => l.SubscriptionId));
     }
 
-    private sealed record Ids(Guid? Customer, Guid? Subscription, Guid? License)
+    private sealed record Ids(Guid? Customer, Guid? Subscription, Guid? License, string? Device = null)
     {
         public static Ids From(string payload)
         {
             try
             {
                 using var doc = JsonDocument.Parse(payload);
-                return new Ids(Read(doc.RootElement, "CustomerId"), Read(doc.RootElement, "SubscriptionId"), Read(doc.RootElement, "LicenseId"));
+                return new Ids(Read(doc.RootElement, "CustomerId"), Read(doc.RootElement, "SubscriptionId"), Read(doc.RootElement, "LicenseId"),
+                    doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("DeviceId", out var device) && device.ValueKind == JsonValueKind.String
+                        ? device.GetString() : null);
             }
             catch (JsonException)
             {

@@ -193,6 +193,40 @@ public sealed class PlanChangePropagationTests : IClassFixture<ChangeFeedFixture
     }
 
     [Fact]
+    public async Task A_device_reset_or_a_new_key_reaches_the_change_feed_with_the_device()
+    {
+        // INT-024: Monitor Cloud marks the device unlicensed from the feed instead of waiting for its next seat check.
+        var issued = await _setup.IssueAsync(maxActivations: 3);
+        var cloud = await Cloud();
+        await ActivateAsync(cloud, issued.Key, issued.ProductCode, "RESET-FEED-01");
+        await ActivateAsync(cloud, issued.Key, issued.ProductCode, "RESET-FEED-02");
+        var (cursor, _) = await ReadFeedAsync(cloud, null);
+        var activationId = await _app.WithDbAsync(db => db.LicenseActivations.IgnoreQueryFilters()
+            .Where(a => a.LicenseId == issued.LicenseId && a.DeviceId == "RESET-FEED-01").Select(a => a.Id).FirstAsync());
+
+        await (await issued.Admin.PostAsync($"/api/v1/licenses/{issued.LicenseId}/activations/{activationId}/reset", null)).OkJsonAsync();
+        await (await issued.Admin.PostAsync($"/api/v1/licenses/{issued.LicenseId}/regenerate-key", null)).OkJsonAsync();
+
+        var devices = new List<string?>();
+        var next = cursor;
+        while (true)
+        {
+            var query = next is null ? "take=200" : $"cursor={Uri.EscapeDataString(next)}&take=200";
+            var page = await (await cloud.GetAsync($"/api/v1/integration/changes?{query}")).OkJsonAsync();
+            foreach (var item in page.GetProperty("items").EnumerateArray().Where(i => i.GetProperty("type").GetString() == "LicenseActivationResetV1"))
+            {
+                Assert.Equal(issued.LicenseId, item.GetProperty("licenseId").GetGuid());
+                Assert.Equal(issued.SubscriptionId, item.GetProperty("subscriptionId").GetGuid());
+                Assert.NotEqual(JsonValueKind.Null, item.GetProperty("customerId").ValueKind);
+                devices.Add(item.GetProperty("deviceId").GetString());
+            }
+            next = page.GetProperty("nextCursor").GetString() ?? next;
+            if (!page.GetProperty("hasMore").GetBoolean()) break;
+        }
+        Assert.Equal(["RESET-FEED-01", "RESET-FEED-02"], devices.Order().ToList());
+    }
+
+    [Fact]
     public async Task A_plan_without_an_end_date_lifts_the_license_expiry_and_a_dated_plan_keeps_it()
     {
         var issued = await _setup.IssueAsync(maxActivations: 3, durationDays: 30);

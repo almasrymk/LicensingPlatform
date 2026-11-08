@@ -160,6 +160,10 @@ public sealed class License : AggregateRoot, ICustomerOwned
     /// Replaces the product key (e.g. after a leak). Every device must activate again with the new key, so the caller
     /// releases all activations; the old key stops working immediately.
     /// </summary>
+    /// <summary>INT-024: tells the change feed that <paramref name="deviceId"/> no longer holds a seat on this license.</summary>
+    public void ActivationReset(string deviceId, string reason) =>
+        Raise(new LicenseActivationResetV1(Id, TenantId, CustomerId, SubscriptionId, deviceId, reason));
+
     public void RegenerateKey(string productKeyHash, string productKeyPrefix)
     {
         if (Status == LicenseStatus.Revoked) throw new DomainException(LicenseErrors.InvalidTransition);
@@ -308,4 +312,10 @@ public sealed class ActivationAttempt : Entity, ITenantOwned
 public sealed record LicenseIssuedV1(Guid LicenseId, Guid TenantId, Guid CustomerId, string LicenseNumber) : DomainEvent;
 /// <summary>E4: a license's entitlements changed with its subscription's plan (in the change feed with its ids).</summary>
 public sealed record LicenseEntitlementsChangedV1(Guid LicenseId, Guid TenantId, Guid CustomerId, Guid SubscriptionId, string PlanCode, int PlanVersion) : DomainEvent;
+/// <summary>
+/// INT-024: a device lost its seat here (reset from a portal, key regenerated, or the device deactivated itself), so
+/// Monitor Cloud marks that device unlicensed at once instead of at its next seat check. <paramref name="DeviceId"/> is
+/// the Licensing device id (the agent fingerprint).
+/// </summary>
+public sealed record LicenseActivationResetV1(Guid LicenseId, Guid TenantId, Guid CustomerId, Guid SubscriptionId, string DeviceId, string Reason) : DomainEvent;
 public sealed record LicenseStatusChangedV1(Guid LicenseId, Guid TenantId, string ProductKeyHash, LicenseStatus Status) : DomainEvent;

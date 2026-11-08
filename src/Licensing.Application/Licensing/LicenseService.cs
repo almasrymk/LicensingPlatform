@@ -156,6 +156,7 @@ public sealed class LicenseService(
         license.RegenerateKey(hash, prefix);
         var activations = await db.LicenseActivations.Where(a => a.LicenseId == id && a.Status == ActivationStatus.Active).ToListAsync(ct);
         activations.ForEach(a => a.Deactivate(now));
+        activations.ForEach(a => license.ActivationReset(a.DeviceId, "key_regenerated"));
         audit.Add("license.key_regenerated", "License", id.ToString(), details: $"prefix={prefix} devices_released={activations.Count}", tenantId: license.TenantId);
         await db.SaveChangesAsync(ct);
         await db.RecountDevicesAsync(id, ct);
@@ -235,6 +236,7 @@ public sealed class LicenseService(
             return Error.Conflict("ACTIVATION_NOT_ACTIVE", "This device is already deactivated.");
 
         activation.Deactivate(clock.GetUtcNow());
+        license.ActivationReset(activation.DeviceId, "device_reset");
         audit.Add("license.device_reset", "License", licenseId.ToString(), details: $"device={activation.DeviceId}", tenantId: license.TenantId);
         await db.SaveChangesAsync(ct);
         await db.RecountDevicesAsync(licenseId, ct);

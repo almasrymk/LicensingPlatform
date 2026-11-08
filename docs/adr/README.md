@@ -71,3 +71,11 @@ subscription is marked over capacity. Nothing is deactivated, disconnected or de
   audit record.
 - **Show usage:** the subscription DTO and the integration entitlements return `activeDevices`, `maxDevices` and
   `overCapacitySince`. The website shows the usage with the two ways out: deactivate a device, or upgrade (INT-014).
+
+## ADR-018 — Device resets reach Monitor Cloud through the change feed (INT-024)
+**Decision:** every seat Licensing takes back from a device writes `LicenseActivationResetV1` (license, customer,
+subscription, `DeviceId`, reason `device_reset` / `key_regenerated` / `deactivated`) to the outbox. The change feed item
+carries the new optional `deviceId`. Monitor Cloud marks that device unlicensed when it reads the item, instead of at its
+next seat check. The other direction already exists: a Cloud retire or unlicense releases the seat through
+`integration/licenses/{id}/devices/{deviceId}/release`, and the event that release writes is harmless to Cloud (the device
+is already unlicensed).
