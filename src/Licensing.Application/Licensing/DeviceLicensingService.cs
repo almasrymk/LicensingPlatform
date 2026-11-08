@@ -262,7 +262,7 @@ public sealed class DeviceLicensingService(
             db.LicenseActivations.Add(LicenseActivation.Create(license, deviceId, request.DeviceName, request.AppVersion, caller.IpAddress, now, request.Os));
             db.ActivationAttempts.Add(ActivationAttempt.Record(tenantId, license, prefix, deviceId, null, caller.IpAddress, now));
         }, ct);
-        if (!seated) return LicenseErrors.ActivationLimitReached;
+        if (!seated) return await LimitErrorAsync(license.Id, ct);
 
         var snapshot = await LoadSnapshotAsync(license, ct);
         var response = await RespondAsync(snapshot!, deviceId, now, alreadyActivated: false, ct);
@@ -285,6 +285,10 @@ public sealed class DeviceLicensingService(
     /// E3: reserves capacity, adds the seat and saves it in one transaction that holds the subscription lock, then rewrites
     /// the cached counters. False (and nothing saved) when the license or subscription limit is reached.
     /// </summary>
+    /// <summary>B4: an over-capacity subscription says so, so the device can tell the user to deactivate one or upgrade.</summary>
+    private async Task<Error> LimitErrorAsync(Guid licenseId, CancellationToken ct) =>
+        await db.IsOverCapacityAsync(licenseId, ct) ? LicenseErrors.SubscriptionOverCapacity : LicenseErrors.ActivationLimitReached;
+
     private Task<bool> SaveNewSeatAsync(Guid licenseId, string deviceId, Action addSeat, CancellationToken ct) =>
         db.InTransactionAsync(async () =>
         {
@@ -383,7 +387,7 @@ public sealed class DeviceLicensingService(
             db.LicenseActivations.Add(LicenseActivation.Create(license, deviceId, request.DeviceName, request.AppVersion, caller.IpAddress, now, request.Os));
             db.ActivationAttempts.Add(ActivationAttempt.Record(tenantId, license, prefix, deviceId, null, caller.IpAddress, now));
         }, ct);
-        if (!seated) return LicenseErrors.ActivationLimitReached;
+        if (!seated) return await LimitErrorAsync(license.Id, ct);
 
         var snapshot = await LoadSnapshotAsync(license, ct);
         var response = await RespondAsync(snapshot!, deviceId, now, alreadyActivated: false, ct);
@@ -602,7 +606,7 @@ public sealed class DeviceLicensingService(
                 audit.Add("license.activated", "License", license.Id.ToString(), details: $"device={deviceId}", tenantId: tenantId);
             }, ct);
             if (!seated)
-                return await FailAttemptAsync(tenantId, license, prefix, deviceId, LicenseErrors.ActivationLimitReached, now, ct);
+                return await FailAttemptAsync(tenantId, license, prefix, deviceId, await LimitErrorAsync(license.Id, ct), now, ct);
         }
         catch (DbUpdateException)
         {

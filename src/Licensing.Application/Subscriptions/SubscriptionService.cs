@@ -13,7 +13,8 @@ namespace Licensing.Application.Subscriptions;
 public sealed record SubscriptionDto(
     Guid Id, Guid TenantId, Guid CustomerId, string CustomerName, Guid ProductId, string ProductName, Guid PlanId, string PlanName,
     int PlanVersion, SubscriptionStatus Status, DateTimeOffset StartDate, DateTimeOffset? EndDate, DateTimeOffset? TrialEndsAt,
-    bool IsLifetime, int Version, IReadOnlyList<SubscriptionAction> AllowedActions, int Licenses, DateTimeOffset CreatedAt);
+    bool IsLifetime, int Version, IReadOnlyList<SubscriptionAction> AllowedActions, int Licenses, DateTimeOffset CreatedAt,
+    int ActiveDevices = 0, int? MaxDevices = null, DateTimeOffset? OverCapacitySince = null);
 
 public sealed record SubscriptionHistoryDto(SubscriptionAction Action, SubscriptionStatus? FromStatus, SubscriptionStatus ToStatus, DateTimeOffset At, string? Details);
 public sealed record SubscriptionDetailsDto(SubscriptionDto Subscription, IReadOnlyList<SubscriptionHistoryDto> History);
@@ -43,6 +44,7 @@ public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, IL
         public required string PlanName { get; init; }
         public int PlanVersion { get; init; }
         public int Licenses { get; init; }
+        public int? MaxDevices { get; init; }
     }
 
     private IQueryable<Row> Rows(IQueryable<Subscription> q) =>
@@ -50,12 +52,12 @@ public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, IL
         join c in db.Customers on s.CustomerId equals c.Id
         join p in db.Products on s.ProductId equals p.Id
         join pl in db.Plans on s.PlanId equals pl.Id
-        select new Row { S = s, CustomerName = c.Name, ProductName = p.Name, PlanName = pl.Name, PlanVersion = pl.Version, Licenses = db.Licenses.Count(l => l.SubscriptionId == s.Id) };
+        select new Row { S = s, CustomerName = c.Name, ProductName = p.Name, PlanName = pl.Name, PlanVersion = pl.Version, Licenses = db.Licenses.Count(l => l.SubscriptionId == s.Id), MaxDevices = pl.MaxActivations };
 
     private static SubscriptionDto ToDto(Row r) => new(
         r.S.Id, r.S.TenantId, r.S.CustomerId, r.CustomerName, r.S.ProductId, r.ProductName, r.S.PlanId, r.PlanName, r.PlanVersion,
         r.S.Status, r.S.StartDate, r.S.EndDate, r.S.TrialEndsAt, r.S.IsLifetime, r.S.Version,
-        Subscription.AllowedActions(r.S.Status), r.Licenses, r.S.CreatedAt);
+        Subscription.AllowedActions(r.S.Status), r.Licenses, r.S.CreatedAt, r.S.ActiveDevices, r.MaxDevices, r.S.OverCapacitySince);
 
     public async Task<PagedResult<SubscriptionDto>> ListAsync(PageQuery page, SubscriptionFilter f, CancellationToken ct)
     {
@@ -178,6 +180,17 @@ public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, IL
 
     public async Task<Result<SubscriptionDetailsDto>> ChangePlanAsync(Guid id, ChangePlanRequest request, CancellationToken ct)
     {
+        var changed = await ChangePlanCoreAsync(id, request, ct);
+        if (changed.IsFailure) return changed;
+        // B4: the new plan's limit decides whether the subscription is over capacity (flag + change-feed event).
+        await db.RecountSubscriptionDevicesAsync(id, ct);
+        // The recount writes the counters and the flag directly, so read them fresh rather than from the tracked row.
+        db.DiscardChanges();
+        return await GetAsync(id, ct);
+    }
+
+    private async Task<Result<SubscriptionDetailsDto>> ChangePlanCoreAsync(Guid id, ChangePlanRequest request, CancellationToken ct)
+    {
         return await MutateAsync(id, request.ExpectedVersion, "subscription.plan_changed", async (sub, now) =>
         {
             var plan = await db.Plans.FirstOrDefaultAsync(p => p.Id == request.PlanId, ct);
@@ -192,8 +205,8 @@ public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, IL
             foreach (var license in licenses)
                 license.ApplyPlan(plan.Id, plan.ToEntitlements(productCode), sub.EndDate);
 
-            // A downgrade below the devices in use: recorded, never enforced by deactivating (no approved policy). New
-            // activations are refused until the subscription is back under its limit.
+            // B4: a downgrade below the devices in use is recorded and the subscription is marked over capacity by the
+            // recount; nothing is deactivated or deleted. New activations are refused until it is back under its limit.
             if (plan.MaxActivations is { } limit && sub.ActiveDevices > limit)
                 audit.Add("subscription.over_capacity", "Subscription", sub.Id.ToString(),
                     details: $"plan={plan.Code} limit={limit} active_devices={sub.ActiveDevices}", tenantId: sub.TenantId);

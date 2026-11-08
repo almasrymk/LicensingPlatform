@@ -56,3 +56,18 @@
 **Decision:** the website, already signed in to Licensing with its API client, asks for a **trial code** for one of its signed-in customers: `POST api/v1/licensing/trial-grants` `{productCode, reference}` (scope `trials.grant`). The code (`ltg_` + 32 random bytes) is single-use, lives `DeviceOffers:TrialGrantHours` (default 24, 1 to 168) and is stored only as a keyed hash. A new code for the same reference cancels the unused one; a reference whose code was redeemed gets `LIC_TRIAL_GRANT_USED` (one trial per website account and product). The Agent redeems it anonymously on `POST api/v1/licensing/device/trial` `{trialCode, deviceId, productCode, …}` (device rate limit). Redemption claims the code atomically, then runs the existing device trial rules unchanged (current trial plan, one trial per device even after reinstalling, the per-address daily limit) and issues a device credential like `device/activate`. A refused trial (`LIC_TRIAL_USED`, address limit) releases the code. Unknown, expired, cancelled, used and other-product codes all answer `LIC_TRIAL_GRANT_INVALID`.
 **Why it is safe:** no secret in the installer; the code is tied to one website account and one product and becomes device-bound once used; the trial gets its own subscription under the tenant's "Trial devices" customer, so a device id alone never reaches another customer's subscription. The API-client route `licensing/trial` stays for integrations that have a client.
 **Tests:** `TrialGrantTests` (end to end with the credential, single use, one trial per device and the code stays usable, invalid/expired/replaced/other-product codes, one trial per account, scope and anonymous refusal, tenant isolation). Migration `TrialGrants`.
+
+## ADR-017 — Over-capacity subscriptions (B4)
+**Decision:** when more devices are active than the plan allows (a downgrade, or a plan whose limit was lowered), the
+subscription is marked over capacity. Nothing is deactivated, disconnected or deleted.
+- **Mark:** `Subscription.OverCapacitySince` is set or cleared by the device recount, which already runs after every
+  activation, release, reset, revoke and plan change. The nightly reconciliation also fixes a flag that disagrees with the
+  plan (rows from before this change).
+- **Block:** new activations are refused while the subscription is at or over its limit. When it is over, the error is
+  `LIC_SUBSCRIPTION_OVER_CAPACITY` ("deactivate a device or upgrade"), so the agent and the portals can say what to do.
+  Devices already active keep validating and heartbeating.
+- **Notify:** each transition writes `SubscriptionOverCapacityV1` / `SubscriptionCapacityRestoredV1` to the outbox, so
+  the change feed carries it to Monitor Cloud and the website. The plan change also keeps its `subscription.over_capacity`
+  audit record.
+- **Show usage:** the subscription DTO and the integration entitlements return `activeDevices`, `maxDevices` and
+  `overCapacitySince`. The website shows the usage with the two ways out: deactivate a device, or upgrade (INT-014).

@@ -116,6 +116,82 @@ public sealed class PlanChangePropagationTests : IClassFixture<ChangeFeedFixture
             .AnyAsync(a => a.Action == "subscription.over_capacity" && a.EntityId == issued.SubscriptionId.ToString())));
     }
 
+    private Task<DateTimeOffset?> OverCapacitySinceAsync(Guid subscriptionId) =>
+        _app.WithDbAsync(db => db.Subscriptions.IgnoreQueryFilters().Where(s => s.Id == subscriptionId).Select(s => s.OverCapacitySince).FirstAsync());
+
+    [Fact]
+    public async Task Over_capacity_is_marked_shown_and_cleared_without_touching_devices()
+    {
+        // B4: mark, refuse new activations with a clear code, publish to the change feed and show usage; never deactivate.
+        var issued = await _setup.IssueAsync(maxActivations: 3);
+        var cloud = await Cloud();
+        await ActivateAsync(cloud, issued.Key, issued.ProductCode, "OVERCAP-01");
+        await ActivateAsync(cloud, issued.Key, issued.ProductCode, "OVERCAP-02");
+        await ActivateAsync(cloud, issued.Key, issued.ProductCode, "OVERCAP-03");
+        var basic = await PlanAsync(issued.Admin, issued.ProductId, "OVERBASIC", 2, 365, ["reports"]);
+        var (cursor, _) = await ReadFeedAsync(cloud, null);
+
+        var changed = await (await ChangePlanAsync(issued.Admin, issued.SubscriptionId, basic)).OkJsonAsync();
+
+        Assert.NotNull(await OverCapacitySinceAsync(issued.SubscriptionId));
+        var shown = changed.GetProperty("subscription");
+        Assert.Equal(3, shown.GetProperty("activeDevices").GetInt32());
+        Assert.Equal(2, shown.GetProperty("maxDevices").GetInt32());
+        Assert.NotEqual(JsonValueKind.Null, shown.GetProperty("overCapacitySince").ValueKind);
+        var refused = await cloud.PostJsonAsync("/api/v1/licensing/activate", new { productKey = issued.Key, deviceId = "OVERCAP-04", productCode = issued.ProductCode });
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        Assert.Contains("LIC_SUBSCRIPTION_OVER_CAPACITY", await refused.Content.ReadAsStringAsync());
+        // A device already active keeps working.
+        await (await cloud.PostJsonAsync("/api/v1/licensing/validate", new { productKey = issued.Key, deviceId = "OVERCAP-01", productCode = issued.ProductCode })).OkJsonAsync();
+        Assert.Equal(3, await _app.WithDbAsync(db => db.LicenseActivations.IgnoreQueryFilters()
+            .CountAsync(a => a.LicenseId == issued.LicenseId && a.Status == ActivationStatus.Active)));
+        var (afterMark, marked) = await ReadFeedAsync(cloud, cursor);
+        Assert.Contains(marked, t => t.Type == "SubscriptionOverCapacityV1");
+
+        // One device released: 2 of 2 is within the limit again, so the flag clears; a new device still needs a free seat.
+        Assert.Equal(HttpStatusCode.NoContent, (await cloud.PostJsonAsync($"/api/v1/integration/licenses/{issued.LicenseId}/devices/OVERCAP-03/release", new { })).StatusCode);
+        Assert.Null(await OverCapacitySinceAsync(issued.SubscriptionId));
+        var (_, restored) = await ReadFeedAsync(cloud, afterMark);
+        Assert.Contains(restored, t => t.Type == "SubscriptionCapacityRestoredV1");
+        var full = await cloud.PostJsonAsync("/api/v1/licensing/activate", new { productKey = issued.Key, deviceId = "OVERCAP-05", productCode = issued.ProductCode });
+        Assert.Contains("LIC_ACTIVATION_LIMIT_REACHED", await full.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Upgrading_an_over_capacity_subscription_clears_the_flag()
+    {
+        var issued = await _setup.IssueAsync(maxActivations: 2);
+        var cloud = await Cloud();
+        await ActivateAsync(cloud, issued.Key, issued.ProductCode, "OVERUP-01");
+        await ActivateAsync(cloud, issued.Key, issued.ProductCode, "OVERUP-02");
+        var tiny = await PlanAsync(issued.Admin, issued.ProductId, "TINY", 1, 365, ["reports"]);
+        var big = await PlanAsync(issued.Admin, issued.ProductId, "BIG", 5, 365, ["reports"]);
+        await (await ChangePlanAsync(issued.Admin, issued.SubscriptionId, tiny)).OkJsonAsync();
+        Assert.NotNull(await OverCapacitySinceAsync(issued.SubscriptionId));
+
+        await (await ChangePlanAsync(issued.Admin, issued.SubscriptionId, big)).OkJsonAsync();
+
+        Assert.Null(await OverCapacitySinceAsync(issued.SubscriptionId));
+        await ActivateAsync(cloud, issued.Key, issued.ProductCode, "OVERUP-03");
+    }
+
+    [Fact]
+    public async Task The_reconciliation_marks_a_subscription_that_was_over_capacity_before_the_flag_existed()
+    {
+        var issued = await _setup.IssueAsync(maxActivations: 2);
+        var cloud = await Cloud();
+        await ActivateAsync(cloud, issued.Key, issued.ProductCode, "OVEROLD-01");
+        await ActivateAsync(cloud, issued.Key, issued.ProductCode, "OVEROLD-02");
+        // As if the plan's limit had been lowered in place before B4: nothing recounted, no flag.
+        var planId = await _app.WithDbAsync(db => db.Subscriptions.IgnoreQueryFilters().Where(s => s.Id == issued.SubscriptionId).Select(s => s.PlanId).FirstAsync());
+        await _app.WithDbAsync(db => db.Plans.IgnoreQueryFilters().Where(p => p.Id == planId).ExecuteUpdateAsync(p => p.SetProperty(x => x.MaxActivations, 1)));
+        Assert.Null(await OverCapacitySinceAsync(issued.SubscriptionId));
+
+        await _app.WithDbAsync(db => db.ReconcileDeviceCountersAsync(100, default));
+
+        Assert.NotNull(await OverCapacitySinceAsync(issued.SubscriptionId));
+    }
+
     [Fact]
     public async Task A_plan_without_an_end_date_lifts_the_license_expiry_and_a_dated_plan_keeps_it()
     {

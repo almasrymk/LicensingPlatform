@@ -51,6 +51,15 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
     /// treated as staff suspensions.
     /// </summary>
     public bool SuspendedByCustomer { get; private set; }
+
+    /// <summary>
+    /// B4: since when more devices are active than the plan allows (after a downgrade, or a plan whose limit was
+    /// lowered). While set, new activations are refused; the devices already active keep working and are never
+    /// deactivated or deleted automatically. Written with <see cref="ActiveDevices"/> by the recount, never by hand.
+    /// </summary>
+    public DateTimeOffset? OverCapacitySince { get; private set; }
+
+    public bool IsOverCapacity => OverCapacitySince is not null;
     /// <summary>Optimistic concurrency token.</summary>
     public int Version { get; private set; }
     public IReadOnlyCollection<SubscriptionHistory> History => _history.AsReadOnly();
@@ -227,6 +236,10 @@ public sealed record SubscriptionStartedV1(Guid SubscriptionId, Guid TenantId, G
 public sealed record SubscriptionExpiredV1(Guid SubscriptionId, Guid TenantId, Guid CustomerId) : DomainEvent;
 public sealed record SubscriptionRenewedV1(Guid SubscriptionId, Guid TenantId, DateTimeOffset? EndDate) : DomainEvent;
 public sealed record SubscriptionPlanChangedV1(Guid SubscriptionId, Guid TenantId, Guid OldPlanId, Guid NewPlanId) : DomainEvent;
+/// <summary>B4: more devices are active than the plan allows. Consumers show the usage and offer deactivate or upgrade.</summary>
+public sealed record SubscriptionOverCapacityV1(Guid SubscriptionId, Guid TenantId, Guid CustomerId, int MaxDevices, int ActiveDevices) : DomainEvent;
+/// <summary>B4: back within the plan's limit (a device deactivated, or a plan with more devices).</summary>
+public sealed record SubscriptionCapacityRestoredV1(Guid SubscriptionId, Guid TenantId, Guid CustomerId, int? MaxDevices, int ActiveDevices) : DomainEvent;
 public sealed record SubscriptionSuspendedV1(Guid SubscriptionId, Guid TenantId) : DomainEvent;
 public sealed record SubscriptionResumedV1(Guid SubscriptionId, Guid TenantId) : DomainEvent;
 public sealed record SubscriptionCancelledV1(Guid SubscriptionId, Guid TenantId) : DomainEvent;

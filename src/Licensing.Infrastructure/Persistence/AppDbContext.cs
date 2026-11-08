@@ -220,12 +220,24 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
             return await RecountSubscriptionAsync(id, ct);
         }, ct);
 
+    public Task RecountSubscriptionDevicesAsync(Guid subscriptionId, CancellationToken ct) =>
+        InTransactionAsync(async () =>
+        {
+            await LockSubscriptionAsync(subscriptionId, ct);
+            return await RecountSubscriptionAsync(subscriptionId, ct);
+        }, ct);
+
+    public Task<bool> IsOverCapacityAsync(Guid licenseId, CancellationToken ct) =>
+        Subscriptions.IgnoreQueryFilters()
+            .AnyAsync(s => s.OverCapacitySince != null && Licenses.IgnoreQueryFilters().Any(l => l.Id == licenseId && l.SubscriptionId == s.Id), ct);
+
     /// <summary>Writes the counters of one subscription and its licenses from the activations. Returns the rows it corrected.</summary>
     private async Task<int> RecountSubscriptionAsync(Guid subscriptionId, CancellationToken ct)
     {
         var devices = await CountedActivations(subscriptionId).Select(a => a.DeviceId).Distinct().CountAsync(ct);
         var repaired = await Subscriptions.IgnoreQueryFilters().Where(s => s.Id == subscriptionId && s.ActiveDevices != devices)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.ActiveDevices, devices), ct);
+        repaired += await MarkCapacityAsync(subscriptionId, devices, ct);
 
         var seats = await Licenses.IgnoreQueryFilters().Where(l => l.SubscriptionId == subscriptionId)
             .Select(l => new
@@ -241,6 +253,44 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
         return repaired;
     }
 
+    /// <summary>
+    /// B4: sets or clears <see cref="Subscription.OverCapacitySince"/> from the counted devices and the plan's limit, and
+    /// writes the transition to the outbox (change feed) in the same transaction. Never deactivates anything.
+    /// </summary>
+    private async Task<int> MarkCapacityAsync(Guid subscriptionId, int devices, CancellationToken ct)
+    {
+        var state = await Subscriptions.IgnoreQueryFilters().Where(s => s.Id == subscriptionId)
+            .Select(s => new
+            {
+                s.TenantId,
+                s.CustomerId,
+                s.OverCapacitySince,
+                Limit = Plans.IgnoreQueryFilters().Where(p => p.Id == s.PlanId).Select(p => p.MaxActivations).FirstOrDefault(),
+            })
+            .FirstOrDefaultAsync(ct);
+        if (state is null) return 0;
+        var over = state.Limit is { } limit && devices > limit;
+        if (over == state.OverCapacitySince.HasValue) return 0;
+
+        DomainEvent change = over
+            ? new SubscriptionOverCapacityV1(subscriptionId, state.TenantId, state.CustomerId, state.Limit!.Value, devices)
+            : new SubscriptionCapacityRestoredV1(subscriptionId, state.TenantId, state.CustomerId, state.Limit, devices);
+        DateTimeOffset? since = over ? change.OccurredAt : null;
+        var changed = await Subscriptions.IgnoreQueryFilters().Where(s => s.Id == subscriptionId)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.OverCapacitySince, since), ct);
+        // Every recount runs right after the caller's own save, so this save carries only the outbox row.
+        OutboxMessages.Add(new OutboxMessage
+        {
+            Id = change.EventId,
+            Type = change.GetType().Name,
+            Payload = JsonSerializer.Serialize(change, change.GetType()),
+            TenantId = state.TenantId,
+            OccurredAt = change.OccurredAt,
+        });
+        await base.SaveChangesAsync(ct);
+        return changed;
+    }
+
     public async Task<int> ReconcileDeviceCountersAsync(int batchSize, CancellationToken ct)
     {
         // Finds subscriptions whose counters disagree with their activations, then repairs each under its own lock.
@@ -250,7 +300,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
                         && l.SubscriptionId == s.Id && l.Status != LicenseStatus.Revoked && l.Status != LicenseStatus.Expired))
                     .Select(a => a.DeviceId).Distinct().Count()
                 || Licenses.IgnoreQueryFilters().Any(l => l.SubscriptionId == s.Id && l.ActiveActivations
-                    != LicenseActivations.IgnoreQueryFilters().Count(a => a.LicenseId == l.Id && a.Status == ActivationStatus.Active)))
+                    != LicenseActivations.IgnoreQueryFilters().Count(a => a.LicenseId == l.Id && a.Status == ActivationStatus.Active))
+                // B4: a flag that disagrees with the plan's limit (rows from before the flag, or a plan edited in place).
+                || (s.OverCapacitySince != null) != Plans.IgnoreQueryFilters()
+                    .Any(p => p.Id == s.PlanId && p.MaxActivations != null && p.MaxActivations < s.ActiveDevices))
             .OrderBy(s => s.Id).Select(s => s.Id).Take(batchSize).ToListAsync(ct);
 
         var repaired = 0;

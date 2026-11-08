@@ -58,6 +58,12 @@ public interface IAppDbContext
     /// <summary>Recomputes the device counters of the license's subscription (and its licenses) from the activations.</summary>
     Task RecountDevicesAsync(Guid licenseId, CancellationToken ct);
 
+    /// <summary>B4: the same recount for one subscription (after its plan, and so its limit, changed).</summary>
+    Task RecountSubscriptionDevicesAsync(Guid subscriptionId, CancellationToken ct);
+
+    /// <summary>B4: whether the license's subscription is over its plan's device limit.</summary>
+    Task<bool> IsOverCapacityAsync(Guid licenseId, CancellationToken ct);
+
     /// <summary>Repairs subscriptions whose stored counters disagree with their activations. Returns the rows corrected.</summary>
     Task<int> ReconcileDeviceCountersAsync(int batchSize, CancellationToken ct);
 }

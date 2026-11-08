@@ -892,6 +892,9 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<DateTimeOffset?>("OverCapacitySince")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<Guid>("PlanId")
                         .HasColumnType("uniqueidentifier");
 

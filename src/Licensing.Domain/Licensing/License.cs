@@ -17,6 +17,9 @@ public static class LicenseErrors
     public static readonly Error Expired = Error.Forbidden("LIC_EXPIRED", "The license has expired.");
     public static readonly Error SubscriptionExpired = Error.Forbidden("LIC_SUBSCRIPTION_EXPIRED", "The subscription for this license has expired.");
     public static readonly Error SubscriptionInactive = Error.Forbidden("LIC_SUBSCRIPTION_INACTIVE", "The subscription for this license is not active.");
+    /// <summary>B4: the subscription has more active devices than its plan allows; nothing new is activated until it is back within the limit.</summary>
+    public static readonly Error SubscriptionOverCapacity = Error.Conflict("LIC_SUBSCRIPTION_OVER_CAPACITY",
+        "This subscription has more active devices than its plan allows. Deactivate a device or upgrade the plan to activate another one.");
     public static readonly Error ActivationLimitReached = Error.Conflict("LIC_ACTIVATION_LIMIT_REACHED", "The maximum number of activations has been reached.");
     public static readonly Error DeviceNotActivated = Error.NotFound("LIC_DEVICE_NOT_ACTIVATED", "This device is not activated for the license.");
     /// <summary>
