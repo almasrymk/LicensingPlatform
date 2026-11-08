@@ -20,6 +20,13 @@ public sealed class ChangeFeedOptions
     public int SettleSeconds { get; set; } = 5;
 
     public int MaxTake { get; set; } = 500;
+
+    /// <summary>
+    /// R11: days the outbox keeps entries for the feed (0 keeps everything). The daily maintenance job deletes processed
+    /// entries older than this, and a cursor older than this is <c>INTEGRATION_CURSOR_EXPIRED</c>, so a consumer that
+    /// was away longer reconciles in full instead of silently missing the purged entries.
+    /// </summary>
+    public int RetentionDays { get; set; } = 30;
 }
 
 /// <summary>
@@ -40,6 +47,8 @@ public sealed class ChangeFeedReader(AppDbContext db, IOptions<ChangeFeedOptions
         {
             after = Cursor.TryParse(cursor);
             if (after is null) return ChangeFeedErrors.CursorInvalid;
+            if (o.RetentionDays > 0 && after.At < WallClock.GetUtcNow().AddDays(-o.RetentionDays))
+                return ChangeFeedErrors.CursorExpired;
         }
 
         var upTo = WallClock.GetUtcNow().AddSeconds(-Math.Max(0, o.SettleSeconds));
@@ -66,7 +75,9 @@ public sealed class ChangeFeedReader(AppDbContext db, IOptions<ChangeFeedOptions
 
         string? next;
         if (rows.Count == 0)
-            next = cursor;
+            // Nothing up to the settle horizon: a cursor moves to it, so a quiet tenant's cursor never grows old enough
+            // to expire (R11). Without a cursor there is still nothing to resume from.
+            next = after is not null && upTo > after.At ? new Cursor(upTo, []).Encode() : cursor;
         else
         {
             var last = rows[^1].OccurredAt;

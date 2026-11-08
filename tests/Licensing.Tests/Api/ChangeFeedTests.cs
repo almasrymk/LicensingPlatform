@@ -104,6 +104,63 @@ public sealed class ChangeFeedTests : IClassFixture<ChangeFeedFixture>
         Assert.Equal(HttpStatusCode.Forbidden, (await user.GetAsync("/api/v1/integration/changes")).StatusCode);
     }
 
+    private static string CursorAt(DateTimeOffset at) =>
+        System.Buffers.Text.Base64Url.EncodeToString(System.Text.Encoding.UTF8.GetBytes($"v1.{at.UtcTicks}.{Guid.NewGuid():N}"));
+
+    [Fact]
+    public async Task A_cursor_older_than_the_retention_is_INTEGRATION_CURSOR_EXPIRED()
+    {
+        // R11: entries after it may be purged, so the consumer must reconcile instead of resuming.
+        var cloud = await Cloud();
+
+        var expired = await cloud.GetAsync($"/api/v1/integration/changes?cursor={CursorAt(DateTimeOffset.UtcNow.AddDays(-31))}");
+        Assert.Equal(HttpStatusCode.BadRequest, expired.StatusCode);
+        Assert.Equal("INTEGRATION_CURSOR_EXPIRED", await expired.ErrorCodeAsync());
+
+        (await cloud.GetAsync($"/api/v1/integration/changes?cursor={CursorAt(DateTimeOffset.UtcNow.AddDays(-29))}")).EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task A_cursor_with_nothing_new_moves_forward_so_a_quiet_tenant_never_expires()
+    {
+        var cloud = await Cloud();
+        var (_, cursor) = await ReadAllAsync(cloud, null, take: 500);
+        // A quiet month later the saved cursor would be old; the empty page already moved it to the read horizon.
+        var old = CursorAt(DateTimeOffset.UtcNow.AddDays(-20));
+
+        var page = await (await cloud.GetAsync($"/api/v1/integration/changes?cursor={Uri.EscapeDataString(cursor!)}")).OkJsonAsync();
+        var fromOld = await (await cloud.GetAsync($"/api/v1/integration/changes?take=500&cursor={old}")).OkJsonAsync();
+
+        Assert.Empty(page.GetProperty("items").EnumerateArray());
+        Assert.NotNull(page.GetProperty("nextCursor").GetString());
+        Assert.NotEqual(old, fromOld.GetProperty("nextCursor").GetString());
+    }
+
+    [Fact]
+    public async Task The_purge_removes_only_old_entries_that_were_dispatched()
+    {
+        var tenantId = await _app.WithDbAsync(db => db.OutboxMessages.Where(m => m.TenantId != null).Select(m => m.TenantId).FirstAsync());
+        var old = DateTimeOffset.UtcNow.AddDays(-45);
+        var ids = new { Processed = Guid.NewGuid(), Pending = Guid.NewGuid(), Dead = Guid.NewGuid(), Recent = Guid.NewGuid() };
+        await _app.WithDbAsync(async db =>
+        {
+            db.OutboxMessages.AddRange(
+                new OutboxMessage { Id = ids.Processed, Type = "PurgeTestV1", Payload = "{}", TenantId = tenantId, OccurredAt = old, ProcessedAt = old },
+                new OutboxMessage { Id = ids.Pending, Type = "PurgeTestV1", Payload = "{}", TenantId = tenantId, OccurredAt = old },
+                new OutboxMessage { Id = ids.Dead, Type = "PurgeTestV1", Payload = "{}", TenantId = tenantId, OccurredAt = old, DeadLettered = true },
+                new OutboxMessage { Id = ids.Recent, Type = "PurgeTestV1", Payload = "{}", TenantId = tenantId, OccurredAt = DateTimeOffset.UtcNow.AddDays(-1), ProcessedAt = DateTimeOffset.UtcNow });
+            db.InboxMessages.Add(new InboxMessage { MessageId = ids.Processed, Handler = "purge-test", ProcessedAt = old });
+            return await db.SaveChangesAsync();
+        });
+
+        var removed = await _app.Get<Licensing.Infrastructure.Jobs.JobRunner>().PurgeOutboxAsync(default);
+
+        Assert.True(removed >= 2);
+        var left = await _app.WithDbAsync(db => db.OutboxMessages.Where(m => m.Type == "PurgeTestV1").Select(m => m.Id).ToListAsync());
+        Assert.Equal(new[] { ids.Pending, ids.Recent }.OrderBy(i => i), left.OrderBy(i => i));
+        Assert.False(await _app.WithDbAsync(db => db.InboxMessages.AnyAsync(m => m.Handler == "purge-test")));
+    }
+
     [Theory]
     [InlineData("not-a-cursor")]
     [InlineData("djEuYWJjLnh5eg")]

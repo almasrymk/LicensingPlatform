@@ -24,4 +24,8 @@ public interface IChangeFeed
 public static class ChangeFeedErrors
 {
     public static readonly Error CursorInvalid = Error.Validation("INTEGRATION_CURSOR_INVALID", "The change feed cursor is not valid. Start again without a cursor.");
+
+    /// <summary>R11: entries after this cursor may have been purged. Start again without a cursor and run a full reconcile.</summary>
+    public static readonly Error CursorExpired = Error.Validation("INTEGRATION_CURSOR_EXPIRED",
+        "The change feed cursor is older than the feed retention. Start again without a cursor and reconcile everything.");
 }
