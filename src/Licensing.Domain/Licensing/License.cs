@@ -17,13 +17,27 @@ public static class LicenseErrors
     public static readonly Error Expired = Error.Forbidden("LIC_EXPIRED", "The license has expired.");
     public static readonly Error SubscriptionExpired = Error.Forbidden("LIC_SUBSCRIPTION_EXPIRED", "The subscription for this license has expired.");
     public static readonly Error SubscriptionInactive = Error.Forbidden("LIC_SUBSCRIPTION_INACTIVE", "The subscription for this license is not active.");
+    /// <summary>B4: the subscription has more active devices than its plan allows; nothing new is activated until it is back within the limit.</summary>
+    public static readonly Error SubscriptionOverCapacity = Error.Conflict("LIC_SUBSCRIPTION_OVER_CAPACITY",
+        "This subscription has more active devices than its plan allows. Deactivate a device or upgrade the plan to activate another one.");
     public static readonly Error ActivationLimitReached = Error.Conflict("LIC_ACTIVATION_LIMIT_REACHED", "The maximum number of activations has been reached.");
     public static readonly Error DeviceNotActivated = Error.NotFound("LIC_DEVICE_NOT_ACTIVATED", "This device is not activated for the license.");
+    /// <summary>
+    /// E7: the seat already has a device credential. A new one is issued only to the holder of the current one (rotate,
+    /// or activate with it), or after the license owner resets the device. A product key and a device id are not enough.
+    /// </summary>
+    public static readonly Error DeviceCredentialExists = Error.Conflict("LIC_DEVICE_CREDENTIAL_EXISTS",
+        "This device already has a credential. Use the current one, or ask the license owner to reset the device.");
     public static readonly Error InvalidDevice = Error.Validation("LIC_INVALID_DEVICE", "Device id must be 8-128 characters of letters, digits, '-', '_', ':' or '.'.");
     public static readonly Error InvalidTransition = Error.Conflict("LIC_INVALID_TRANSITION", "This action is not allowed in the license's current state.");
     public static readonly Error TrialUnavailable = Error.NotFound("LIC_TRIAL_UNAVAILABLE", "This product has no published plan with trial days.");
     public static readonly Error TrialUsed = Error.Conflict("LIC_TRIAL_USED", "This device has already used its trial.");
     public static readonly Error FreeUnavailable = Error.NotFound("LIC_FREE_UNAVAILABLE", "This product has no current free plan.");
+    /// <summary>INT-020 (ADR-006): too many trial or free licenses were started from one network address in a day.</summary>
+    public static readonly Error DeviceOfferLimit = new("LIC_DEVICE_OFFER_LIMIT",
+        "Too many trial or free licenses were started from this network today. Try again tomorrow or contact support.", ErrorKind.TooManyRequests);
+    public static readonly Error SuspendedByProvider =
+        Error.Conflict("LICENSE_SUSPENDED_BY_PROVIDER", "This license was suspended by your provider. Contact them to resume it.");
     public static readonly Error FreeUsed = Error.Conflict("LIC_FREE_USED", "This device already has its free plan license.");
 }
 
@@ -58,6 +72,8 @@ public sealed class License : AggregateRoot, ICustomerOwned
     public int ActiveActivations { get; private set; }
     public DateTimeOffset? RevokedAt { get; private set; }
     public string? StatusReason { get; private set; }
+    /// <summary>INT-013: as <see cref="Subscriptions.Subscription.SuspendedByCustomer"/>, for one license.</summary>
+    public bool SuspendedByCustomer { get; private set; }
 
     public IReadOnlyList<string> Features =>
         FeaturesValue.Length == 0 ? [] : FeaturesValue.Split(';', StringSplitOptions.RemoveEmptyEntries);
@@ -101,17 +117,20 @@ public sealed class License : AggregateRoot, ICustomerOwned
         _ => null,
     };
 
-    public void Suspend(string? reason)
+    public void Suspend(string? reason, bool byCustomer = false)
     {
         if (Status != LicenseStatus.Active) throw new DomainException(LicenseErrors.InvalidTransition);
         Status = LicenseStatus.Suspended;
+        SuspendedByCustomer = byCustomer;
         StatusReason = reason;
         Raise(new LicenseStatusChangedV1(Id, TenantId, ProductKeyHash, Status));
     }
 
-    public void Resume()
+    public void Resume(bool byCustomer = false)
     {
         if (Status != LicenseStatus.Suspended) throw new DomainException(LicenseErrors.InvalidTransition);
+        if (byCustomer && !SuspendedByCustomer) throw new DomainException(LicenseErrors.SuspendedByProvider);
+        SuspendedByCustomer = false;
         Status = LicenseStatus.Active;
         StatusReason = null;
         Raise(new LicenseStatusChangedV1(Id, TenantId, ProductKeyHash, Status));
@@ -141,6 +160,10 @@ public sealed class License : AggregateRoot, ICustomerOwned
     /// Replaces the product key (e.g. after a leak). Every device must activate again with the new key, so the caller
     /// releases all activations; the old key stops working immediately.
     /// </summary>
+    /// <summary>INT-024: tells the change feed that <paramref name="deviceId"/> no longer holds a seat on this license.</summary>
+    public void ActivationReset(string deviceId, string reason) =>
+        Raise(new LicenseActivationResetV1(Id, TenantId, CustomerId, SubscriptionId, deviceId, reason));
+
     public void RegenerateKey(string productKeyHash, string productKeyPrefix)
     {
         if (Status == LicenseStatus.Revoked) throw new DomainException(LicenseErrors.InvalidTransition);
@@ -148,6 +171,25 @@ public sealed class License : AggregateRoot, ICustomerOwned
         ProductKeyPrefix = productKeyPrefix;
         ActiveActivations = 0;
         Raise(new LicenseStatusChangedV1(Id, TenantId, ProductKeyHash, Status));
+    }
+
+    /// <summary>
+    /// E4: follows a plan change of its subscription. The entitlement snapshot (plan, version, features, limits) becomes
+    /// the new plan's, as if issued on it, and the expiry follows the subscription. Seats are never touched here: a
+    /// downgrade below the active devices leaves them active (no commercial policy approves removing them).
+    /// </summary>
+    public void ApplyPlan(Guid planId, Entitlements entitlements, DateTimeOffset? expiresAt)
+    {
+        if (Status == LicenseStatus.Revoked) throw new DomainException(LicenseErrors.InvalidTransition);
+        PlanId = planId;
+        PlanCode = entitlements.PlanCode;
+        PlanVersion = entitlements.PlanVersion;
+        FeaturesValue = string.Join(';', entitlements.Features);
+        MaxActivations = entitlements.MaxActivations;
+        HeartbeatIntervalHours = entitlements.HeartbeatIntervalHours;
+        OfflineGraceDays = entitlements.OfflineGraceDays;
+        Raise(new LicenseEntitlementsChangedV1(Id, TenantId, CustomerId, SubscriptionId, PlanCode, PlanVersion));
+        Reinstate(expiresAt);
     }
 
     /// <summary>Follows the subscription when it is renewed (licenses expired with it come back).</summary>
@@ -179,6 +221,14 @@ public sealed class LicenseActivation : Entity, ICustomerOwned
     public DateTimeOffset? LastHeartbeatAt { get; private set; }
     public string? LastIpAddress { get; private set; }
     public string? OperatingSystem { get; private set; }
+
+    /// <summary>
+    /// Keyed hash of this device's credential (INT-002, ADR-001). Issued by a product-key activation; null for seats
+    /// activated through an API client. Cleared when the seat is deactivated.
+    /// </summary>
+    public string? CredentialHash { get; private set; }
+
+    public void IssueCredential(string hash) => CredentialHash = hash;
 
     public static LicenseActivation Create(License license, string deviceId, string? deviceName, string? appVersion, string? ip, DateTimeOffset now, string? os = null) => new()
     {
@@ -222,6 +272,7 @@ public sealed class LicenseActivation : Entity, ICustomerOwned
     {
         Status = ActivationStatus.Deactivated;
         DeactivatedAt = now;
+        CredentialHash = null;
     }
 
     public static bool IsValidDeviceId(string? deviceId) =>
@@ -259,4 +310,12 @@ public sealed class ActivationAttempt : Entity, ITenantOwned
 }
 
 public sealed record LicenseIssuedV1(Guid LicenseId, Guid TenantId, Guid CustomerId, string LicenseNumber) : DomainEvent;
+/// <summary>E4: a license's entitlements changed with its subscription's plan (in the change feed with its ids).</summary>
+public sealed record LicenseEntitlementsChangedV1(Guid LicenseId, Guid TenantId, Guid CustomerId, Guid SubscriptionId, string PlanCode, int PlanVersion) : DomainEvent;
+/// <summary>
+/// INT-024: a device lost its seat here (reset from a portal, key regenerated, or the device deactivated itself), so
+/// Monitor Cloud marks that device unlicensed at once instead of at its next seat check. <paramref name="DeviceId"/> is
+/// the Licensing device id (the agent fingerprint).
+/// </summary>
+public sealed record LicenseActivationResetV1(Guid LicenseId, Guid TenantId, Guid CustomerId, Guid SubscriptionId, string DeviceId, string Reason) : DomainEvent;
 public sealed record LicenseStatusChangedV1(Guid LicenseId, Guid TenantId, string ProductKeyHash, LicenseStatus Status) : DomainEvent;

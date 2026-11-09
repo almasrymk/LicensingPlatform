@@ -28,6 +28,7 @@ public interface IAppDbContext
     DbSet<License> Licenses { get; }
     DbSet<LicenseActivation> LicenseActivations { get; }
     DbSet<ActivationAttempt> ActivationAttempts { get; }
+    DbSet<TrialGrant> TrialGrants { get; }
     DbSet<SigningKey> SigningKeys { get; }
     DbSet<ApiClient> ApiClients { get; }
     DbSet<Webhook> Webhooks { get; }
@@ -37,10 +38,34 @@ public interface IAppDbContext
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Atomically reserves one activation slot. Returns false when the limit is already reached.</summary>
-    Task<bool> TryReserveActivationSlotAsync(Guid licenseId, CancellationToken ct);
+    /// <summary>Forgets every pending change, after a save lost a race on a unique key.</summary>
+    void DiscardChanges();
 
-    Task ReleaseActivationSlotAsync(Guid licenseId, CancellationToken ct);
+    /// <summary>
+    /// Runs <paramref name="work"/> in one database transaction (or inside the current one), committing when it returns
+    /// and rolling back when it throws.
+    /// </summary>
+    Task<T> InTransactionAsync<T>(Func<Task<T>> work, CancellationToken ct);
+
+    /// <summary>
+    /// E3 (R1/R2): decides whether <paramref name="deviceId"/> may take a seat on the license. Must run inside
+    /// <see cref="InTransactionAsync{T}"/> together with the save of the activation: it locks the subscription until the
+    /// transaction ends, so concurrent activations of one subscription cannot exceed its limit. A device already active on
+    /// another license of the subscription needs no new subscription slot. Returns false when a limit is reached.
+    /// </summary>
+    Task<bool> TryReserveActivationSlotAsync(Guid licenseId, string deviceId, CancellationToken ct);
+
+    /// <summary>Recomputes the device counters of the license's subscription (and its licenses) from the activations.</summary>
+    Task RecountDevicesAsync(Guid licenseId, CancellationToken ct);
+
+    /// <summary>B4: the same recount for one subscription (after its plan, and so its limit, changed).</summary>
+    Task RecountSubscriptionDevicesAsync(Guid subscriptionId, CancellationToken ct);
+
+    /// <summary>B4: whether the license's subscription is over its plan's device limit.</summary>
+    Task<bool> IsOverCapacityAsync(Guid licenseId, CancellationToken ct);
+
+    /// <summary>Repairs subscriptions whose stored counters disagree with their activations. Returns the rows corrected.</summary>
+    Task<int> ReconcileDeviceCountersAsync(int batchSize, CancellationToken ct);
 }
 
 /// <summary>Who is calling, resolved from the authenticated principal only (never from the request body).</summary>
@@ -75,6 +100,15 @@ public interface ITenantContext
     bool IsUnrestricted { get; }
 }
 
+/// <summary>
+/// Lets an anonymous, product-key-authenticated request act inside the tenant that owns the key (INT-002). Only
+/// <see cref="Licensing.DeviceLicensingService"/> uses it, after resolving the key itself.
+/// </summary>
+public interface ITenantScope
+{
+    void RunAsSystem(Guid? tenantId);
+}
+
 public interface IPasswordHasher
 {
     string Hash(string password);
@@ -106,7 +140,8 @@ public interface IProductKeyGenerator
 
 public sealed record LicenseTokenClaims(
     string LicenseNumber, Guid LicenseId, Guid TenantId, string ProductCode, string PlanCode, string DeviceId,
-    IReadOnlyList<string> Features, DateTimeOffset? LicenseExpiresAt, DateTimeOffset CheckAfter, DateTimeOffset OfflineValidUntil);
+    IReadOnlyList<string> Features, DateTimeOffset? LicenseExpiresAt, DateTimeOffset CheckAfter, DateTimeOffset OfflineValidUntil,
+    Guid? CustomerId = null);
 
 public sealed record SignedLicenseToken(string Token, string Kid, DateTimeOffset ExpiresAt);
 

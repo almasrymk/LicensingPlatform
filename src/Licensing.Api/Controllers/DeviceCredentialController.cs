@@ -1,0 +1,77 @@
+using Licensing.Api.Infrastructure;
+using Licensing.Application.Licensing;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+
+namespace Licensing.Api.Controllers;
+
+/// <summary>
+/// INT-002 (ADR-001): licensing for an installation that has no API client. <c>activate</c> takes the product key and
+/// returns a device credential once; the other calls send it in the <c>X-Device-Credential</c> header. Anonymous,
+/// rate limited per IP. The API-client routes of <see cref="LicensingController"/> are unchanged.
+/// </summary>
+[ApiController]
+[AllowAnonymous]
+[Route("api/v1/licensing/device")]
+[Tags("Licensing (device credential)")]
+[EnableRateLimiting(RateLimits.DeviceLicensing)]
+public sealed class DeviceCredentialController(DeviceLicensingService licensing) : ControllerBase
+{
+    public const string CredentialHeader = "X-Device-Credential";
+
+    /// <summary>
+    /// Activates this device with a product key and returns <c>{ license, deviceCredential }</c>. The credential is
+    /// shown only here. E7: activating a device that already has a credential needs that credential in the header (it is
+    /// then replaced); without it the answer is <c>LIC_DEVICE_CREDENTIAL_EXISTS</c> and the license owner resets the device.
+    /// </summary>
+    [HttpPost("activate")]
+    public async Task<IActionResult> Activate(ActivateRequest request, [FromHeader(Name = CredentialHeader)] string? credential, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        return this.ToActionResult(await licensing.ActivateWithKeyAsync(request, ct, credential));
+    }
+
+    /// <summary>
+    /// B5: starts this device's one trial with the single-use code the customer got on the website, and returns
+    /// <c>{ productKey, license, trialDays, deviceCredential }</c> (key and credential shown only here). No shared secret.
+    /// </summary>
+    [HttpPost("trial")]
+    public async Task<IActionResult> Trial(DeviceTrialRequest request, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        return this.ToActionResult(await licensing.StartTrialWithGrantAsync(request, ct));
+    }
+
+    /// <summary>E7: replaces this device's credential. Needs the current one; the old one stops working at once.</summary>
+    [HttpPost("rotate")]
+    public async Task<IActionResult> Rotate(DeviceCheckRequest request, [FromHeader(Name = CredentialHeader)] string? credential, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        return this.ToActionResult(await licensing.RotateCredentialAsync(request, credential, ct));
+    }
+
+    /// <summary>
+    /// For an installation already activated through an API client: returns a credential for the seat it holds, without
+    /// taking a new slot. <c>LIC_DEVICE_NOT_ACTIVATED</c> when the device has no active seat; E7:
+    /// <c>LIC_DEVICE_CREDENTIAL_EXISTS</c> when the seat already has a credential (claim works once per seat).
+    /// </summary>
+    [HttpPost("claim")]
+    public async Task<IActionResult> Claim(ValidateRequest request, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        return this.ToActionResult(await licensing.ClaimWithKeyAsync(request, ct));
+    }
+
+    [HttpPost("validate")]
+    public async Task<IActionResult> Validate(DeviceCheckRequest request, [FromHeader(Name = CredentialHeader)] string? credential, CancellationToken ct) =>
+        this.ToActionResult(await licensing.CheckWithCredentialAsync(request, credential, heartbeat: false, ct));
+
+    [HttpPost("heartbeat")]
+    public async Task<IActionResult> Heartbeat(DeviceCheckRequest request, [FromHeader(Name = CredentialHeader)] string? credential, CancellationToken ct) =>
+        this.ToActionResult(await licensing.CheckWithCredentialAsync(request, credential, heartbeat: true, ct));
+
+    [HttpPost("deactivate")]
+    public async Task<IActionResult> Deactivate(DeviceCheckRequest request, [FromHeader(Name = CredentialHeader)] string? credential, CancellationToken ct) =>
+        this.ToActionResult(await licensing.DeactivateWithCredentialAsync(request, credential, ct));
+}

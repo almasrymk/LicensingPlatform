@@ -12,6 +12,15 @@
 | `Seed:DemoData` | `false` دائماً في الإنتاج |
 | `Seed:AdminEmail` / `Seed:AdminPassword` | لإنشاء أول PlatformAdmin فقط، ثم يُحذفان |
 
+**فحص الجاهزية (E7):** في بيئة `Production` يرفض الـ API البدء إذا وجد إعداداً غير آمن: مفتاح JWT أو الـ pepper قصير أو
+قيمة تطوير (`DEV-ONLY`/`TEST-ONLY`/`change-me`)، `Seed:DemoData=true`، قاعدة SQLite، `Cors:Origins` فيها `*` أو localhost أو
+http، حدود المعدل معطلة، أو `Outbox:Enabled=false`. الرسائل تذكر اسم الإعداد فقط ولا تطبع قيمته. `Readiness:Enforce=false`
+يسمح بالتشغيل مؤقتاً لإصلاح الخادم، وعندها يعود `/health/ready` بحالة Unhealthy حتى تُصلح الإعدادات.
+
+**بيانات اعتماد الجهاز (E7):** `device/activate` و `device/claim` لا يصدران بيانات اعتماد جديدة لجهاز لديه واحدة بالفعل
+(`LIC_DEVICE_CREDENTIAL_EXISTS`) إلا لمن يرسل الحالية في `X-Device-Credential`. الجهاز يغيّرها بنفسه عبر `device/rotate`.
+الاسترداد بعد إعادة التثبيت: مالك الرخصة يعيد ضبط الجهاز من شاشة الأجهزة (`activations/{id}/reset`) ثم يُفعَّل بالمفتاح من جديد.
+
 ## الـ Migrations كخطوة release مستقلة
 
 ```bash
@@ -47,6 +56,7 @@ dotnet ef migrations script --idempotent -p src/Licensing.Infrastructure -s src/
 ## المراقبة والتنبيهات المقترحة
 - معدل 5xx > 1% لمدة 5 دقائق، وp95 لـ `/licensing/validate` > 300ms.
 - `OutboxMessages` غير المعالجة > 1000 أو أي رسالة `DeadLettered = 1`.
+  - عند وصول رسالة لـ dead-letter يُكتب سجل Audit بالإجراء `outbox.dead_lettered`، ويرجع `GET /health/outbox` بالحالة 503 حتى تُعالج الرسالة. اربط مراقب uptime خارجي بهذا المسار ليرسل التنبيه (البريد أو الرسائل خارج المنصة، ويحتاج إعداداً من المالك). `/health/ready` لا يتأثر.
 - محاولات تفعيل فاشلة لـ tenant واحد > 100 في الساعة (إساءة استخدام محتملة).
 - استخدام CPU/IO للـ SQL Server > 80%.
 

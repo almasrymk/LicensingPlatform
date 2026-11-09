@@ -30,6 +30,36 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? CancelledAt { get; private set; }
     public string? Notes { get; private set; }
+
+    /// <summary>
+    /// The caller's own id for this subscription (INT-016), unique per tenant. A repeated start with the same reference
+    /// returns this subscription instead of creating another one.
+    /// </summary>
+    public string? ExternalReference { get; private set; }
+
+    /// <summary>
+    /// INT-015 (ADR-004): distinct devices active across the subscription's non-revoked, non-expired licenses. The plan's
+    /// MaxActivations limits this total, so issuing another license never adds capacity. A cached count for reads only:
+    /// the limit is enforced by counting the activations (<c>IAppDbContext.TryReserveActivationSlotAsync</c>), and the
+    /// value is rewritten by <c>RecountDevicesAsync</c> and the reconciliation job, never through the tracked entity.
+    /// </summary>
+    public int ActiveDevices { get; private set; }
+
+    /// <summary>
+    /// INT-013: true when the customer suspended it themselves (through the website). A customer can resume only such a
+    /// suspension; one made by the provider's staff stays until staff resume it. Rows suspended before this existed are
+    /// treated as staff suspensions.
+    /// </summary>
+    public bool SuspendedByCustomer { get; private set; }
+
+    /// <summary>
+    /// B4: since when more devices are active than the plan allows (after a downgrade, or a plan whose limit was
+    /// lowered). While set, new activations are refused; the devices already active keep working and are never
+    /// deactivated or deleted automatically. Written with <see cref="ActiveDevices"/> by the recount, never by hand.
+    /// </summary>
+    public DateTimeOffset? OverCapacitySince { get; private set; }
+
+    public bool IsOverCapacity => OverCapacitySince is not null;
     /// <summary>Optimistic concurrency token.</summary>
     public int Version { get; private set; }
     public IReadOnlyCollection<SubscriptionHistory> History => _history.AsReadOnly();
@@ -48,7 +78,7 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
 
     public static Subscription Start(
         Guid tenantId, Guid customerId, Guid productId, Guid planId, DateTimeOffset start,
-        int? durationDays, int? trialDays, DateTimeOffset now, string? notes = null)
+        int? durationDays, int? trialDays, DateTimeOffset now, string? notes = null, string? externalReference = null)
     {
         var sub = new Subscription
         {
@@ -59,6 +89,7 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
             StartDate = start,
             CreatedAt = now,
             Notes = notes?.Trim(),
+            ExternalReference = string.IsNullOrWhiteSpace(externalReference) ? null : externalReference.Trim(),
         };
 
         if (trialDays is > 0)
@@ -78,7 +109,8 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
         return sub;
     }
 
-    public void Renew(int? durationDays, DateTimeOffset now)
+    /// <param name="reference">INT-018: the caller's id for this renewal (a paid order). Kept on the history entry, unique per subscription.</param>
+    public void Renew(int? durationDays, DateTimeOffset now, string? reference = null)
     {
         Ensure(SubscriptionAction.Renew);
         var from = Status;
@@ -93,7 +125,8 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
         }
         TrialEndsAt = null;
         Status = SubscriptionStatus.Active;
-        Record(SubscriptionAction.Renew, from, Status, now, EndDate is null ? "lifetime" : $"until {EndDate:yyyy-MM-dd}");
+        Record(SubscriptionAction.Renew, from, Status, now, EndDate is null ? "lifetime" : $"until {EndDate:yyyy-MM-dd}",
+            string.IsNullOrWhiteSpace(reference) ? null : reference.Trim());
         Raise(new SubscriptionRenewedV1(Id, TenantId, EndDate));
     }
 
@@ -109,18 +142,24 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
         Raise(new SubscriptionPlanChangedV1(Id, TenantId, oldPlan, newPlanId));
     }
 
-    public void Suspend(string? reason, DateTimeOffset now)
+    public static readonly Error SuspendedByProvider =
+        Error.Conflict("SUBSCRIPTION_SUSPENDED_BY_PROVIDER", "This subscription was suspended by your provider. Contact them to resume it.");
+
+    public void Suspend(string? reason, DateTimeOffset now, bool byCustomer = false)
     {
         Ensure(SubscriptionAction.Suspend);
         var from = Status;
         Status = SubscriptionStatus.Suspended;
+        SuspendedByCustomer = byCustomer;
         Record(SubscriptionAction.Suspend, from, Status, now, reason);
         Raise(new SubscriptionSuspendedV1(Id, TenantId));
     }
 
-    public void Resume(DateTimeOffset now)
+    public void Resume(DateTimeOffset now, bool byCustomer = false)
     {
         Ensure(SubscriptionAction.Resume);
+        if (byCustomer && !SuspendedByCustomer) throw new DomainException(SuspendedByProvider);
+        SuspendedByCustomer = false;
         Status = TrialEndsAt is not null && TrialEndsAt > now ? SubscriptionStatus.Trial : SubscriptionStatus.Active;
         Record(SubscriptionAction.Resume, SubscriptionStatus.Suspended, Status, now, null);
         Raise(new SubscriptionResumedV1(Id, TenantId));
@@ -155,10 +194,10 @@ public sealed class Subscription : AggregateRoot, ICustomerOwned
                 "SUBSCRIPTION_INVALID_TRANSITION", $"Cannot {action} a subscription that is {Status}."));
     }
 
-    private void Record(SubscriptionAction action, SubscriptionStatus? from, SubscriptionStatus to, DateTimeOffset at, string? details)
+    private void Record(SubscriptionAction action, SubscriptionStatus? from, SubscriptionStatus to, DateTimeOffset at, string? details, string? reference = null)
     {
         Version++;
-        _history.Add(new SubscriptionHistory(Id, TenantId, action, from, to, at, details));
+        _history.Add(new SubscriptionHistory(Id, TenantId, action, from, to, at, details, reference));
     }
 }
 
@@ -167,8 +206,9 @@ public sealed class SubscriptionHistory : Entity, ITenantOwned
     private SubscriptionHistory() { }
 
     internal SubscriptionHistory(Guid subscriptionId, Guid tenantId, SubscriptionAction action,
-        SubscriptionStatus? fromStatus, SubscriptionStatus toStatus, DateTimeOffset at, string? details)
+        SubscriptionStatus? fromStatus, SubscriptionStatus toStatus, DateTimeOffset at, string? details, string? reference = null)
     {
+        Reference = reference;
         SubscriptionId = subscriptionId;
         TenantId = tenantId;
         Action = action;
@@ -185,6 +225,9 @@ public sealed class SubscriptionHistory : Entity, ITenantOwned
     public SubscriptionStatus ToStatus { get; private set; }
     public DateTimeOffset At { get; private set; }
     public string? Details { get; private set; }
+
+    /// <summary>The caller's id of the action (a renewal's paid order). Unique per subscription.</summary>
+    public string? Reference { get; private set; }
 }
 
 // Integration events published through the outbox. The V1 suffix is part of the contract.
@@ -193,6 +236,10 @@ public sealed record SubscriptionStartedV1(Guid SubscriptionId, Guid TenantId, G
 public sealed record SubscriptionExpiredV1(Guid SubscriptionId, Guid TenantId, Guid CustomerId) : DomainEvent;
 public sealed record SubscriptionRenewedV1(Guid SubscriptionId, Guid TenantId, DateTimeOffset? EndDate) : DomainEvent;
 public sealed record SubscriptionPlanChangedV1(Guid SubscriptionId, Guid TenantId, Guid OldPlanId, Guid NewPlanId) : DomainEvent;
+/// <summary>B4: more devices are active than the plan allows. Consumers show the usage and offer deactivate or upgrade.</summary>
+public sealed record SubscriptionOverCapacityV1(Guid SubscriptionId, Guid TenantId, Guid CustomerId, int MaxDevices, int ActiveDevices) : DomainEvent;
+/// <summary>B4: back within the plan's limit (a device deactivated, or a plan with more devices).</summary>
+public sealed record SubscriptionCapacityRestoredV1(Guid SubscriptionId, Guid TenantId, Guid CustomerId, int? MaxDevices, int ActiveDevices) : DomainEvent;
 public sealed record SubscriptionSuspendedV1(Guid SubscriptionId, Guid TenantId) : DomainEvent;
 public sealed record SubscriptionResumedV1(Guid SubscriptionId, Guid TenantId) : DomainEvent;
 public sealed record SubscriptionCancelledV1(Guid SubscriptionId, Guid TenantId) : DomainEvent;

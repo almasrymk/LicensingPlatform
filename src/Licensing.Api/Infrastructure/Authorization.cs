@@ -7,7 +7,10 @@ using Microsoft.AspNetCore.Authorization.Policy;
 
 namespace Licensing.Api.Infrastructure;
 
-/// <summary>Requires a portal user whose role grants the permission. Enforced server-side whatever the UI shows.</summary>
+/// <summary>
+/// Requires a portal user whose role grants the permission, or (E7) an API client holding the scope of the same name when
+/// the permission is in <see cref="ApiScopes.GrantablePermissions"/>. Enforced server-side whatever the UI shows.
+/// </summary>
 public sealed class HasPermissionAttribute(string permission) : AuthorizeAttribute(AuthPolicies.Permission(permission));
 
 /// <summary>Requires an API client token that carries the scope.</summary>
@@ -24,20 +27,29 @@ public static class AuthPolicies
     public static void Register(AuthorizationOptions options)
     {
         foreach (var permission in Permissions.All)
-            options.AddPolicy(Permission(permission), p => p.RequireAuthenticatedUser()
-                .RequireClaim(ClaimNames.TokenType, "user")
-                .RequireClaim(ClaimNames.Permission, permission));
+        {
+            var grantable = ApiScopes.GrantablePermissions.Contains(permission);
+            options.AddPolicy(Permission(permission), p => p.RequireAuthenticatedUser().RequireAssertion(ctx =>
+                ctx.User.FindFirst(ClaimNames.TokenType)?.Value switch
+                {
+                    "user" => ctx.User.HasClaim(ClaimNames.Permission, permission),
+                    "client" => grantable && HasScope(ctx.User, permission),
+                    _ => false,
+                }));
+        }
 
         foreach (var scope in ApiScopes.All)
             options.AddPolicy(Scope(scope), p => p.RequireAuthenticatedUser()
                 .RequireClaim(ClaimNames.TokenType, "client")
-                .RequireAssertion(ctx => (ctx.User.FindFirst(ClaimNames.Scope)?.Value ?? "")
-                    .Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(scope)));
+                .RequireAssertion(ctx => HasScope(ctx.User, scope)));
 
         options.AddPolicy(PlatformAdmin, p => p.RequireAuthenticatedUser()
             .RequireClaim(ClaimNames.TokenType, "user").RequireRole(Roles.PlatformAdmin));
         options.AddPolicy(AnyUser, p => p.RequireAuthenticatedUser().RequireClaim(ClaimNames.TokenType, "user"));
     }
+
+    private static bool HasScope(System.Security.Claims.ClaimsPrincipal user, string scope) =>
+        (user.FindFirst(ClaimNames.Scope)?.Value ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(scope);
 }
 
 /// <summary>Writes 401/403 as ProblemDetails with AUTH_UNAUTHORIZED / AUTH_FORBIDDEN codes.</summary>

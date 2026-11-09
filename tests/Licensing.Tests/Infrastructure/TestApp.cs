@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Licensing.Infrastructure.Identity;
 using Licensing.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -23,11 +24,15 @@ public sealed class TestClock : TimeProvider
 
 /// <summary>
 /// The real API host on an isolated database. SQLite by default; set LICENSING_TEST_SQLSERVER=1 to run the same
-/// tests against the local SQL Server (database LicensingPlatform_Tests_*).
+/// tests against the local SQL Server (database lic_test_*). LICENSING_TEST_SQLSERVER_SERVER, when set, replaces the
+/// default "Server=.;Trusted_Connection=True" part (for a SQL Server in a container; never commit its password).
 /// </summary>
 public sealed class TestApp : WebApplicationFactory<Program>
 {
     public static readonly bool UseSqlServer = Environment.GetEnvironmentVariable("LICENSING_TEST_SQLSERVER") == "1";
+
+    private static string SqlServerBase =>
+        Environment.GetEnvironmentVariable("LICENSING_TEST_SQLSERVER_SERVER") is { Length: > 0 } server ? server : "Server=.;Trusted_Connection=True";
 
     private readonly string _dbName = $"lic_test_{Guid.NewGuid():N}";
     private readonly string _workDir = Path.Combine(Path.GetTempPath(), "licensing-tests", Guid.NewGuid().ToString("N"));
@@ -52,7 +57,7 @@ public sealed class TestApp : WebApplicationFactory<Program>
             {
                 ["Database:Provider"] = UseSqlServer ? "SqlServer" : "Sqlite",
                 ["ConnectionStrings:Default"] = UseSqlServer
-                    ? $"Server=.;Database={_dbName};Trusted_Connection=True;TrustServerCertificate=True"
+                    ? $"{SqlServerBase};Database={_dbName};TrustServerCertificate=True"
                     : $"Data Source={Path.Combine(_workDir, "test.db")};Default Timeout=60",
                 ["ConnectionStrings:Redis"] = "",
                 ["Jwt:SigningKey"] = "TEST-ONLY-jwt-signing-key-0123456789abcdef0123",
@@ -68,6 +73,7 @@ public sealed class TestApp : WebApplicationFactory<Program>
                 ["RateLimits:LoginPerMinute"] = "1000",
                 ["RateLimits:ClientTokenPerMinute"] = "1000",
                 ["RateLimits:LicensingPerMinute"] = "100000",
+                ["RateLimits:DeviceLicensingPerMinute"] = "100000",
             };
             foreach (var (k, v) in _overrides) settings[k] = v;
             config.AddInMemoryCollection(settings);
@@ -76,7 +82,24 @@ public sealed class TestApp : WebApplicationFactory<Program>
         {
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(Clock);
+            services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter, TestRemoteIpFilter>();
         });
+    }
+
+    /// <summary>Header a test sends to choose its client address (TestServer has none).</summary>
+    public const string RemoteIpHeader = "X-Test-Remote-Ip";
+
+    private sealed class TestRemoteIpFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
+    {
+        public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next) => app =>
+        {
+            app.Use((context, nextMiddleware) =>
+            {
+                if (context.Request.Headers.TryGetValue(RemoteIpHeader, out var ip)) context.Connection.RemoteIpAddress = IPAddress.Parse(ip.ToString());
+                return nextMiddleware(context);
+            });
+            next(app);
+        };
     }
 
     public HttpClient Anonymous() => CreateClient();

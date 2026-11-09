@@ -17,6 +17,9 @@ public sealed class Customer : AggregateRoot, ITenantOwned
     public string? Phone { get; private set; }
     public string? Country { get; private set; }
     public string? TaxNumber { get; private set; }
+
+    /// <summary>The caller's own id for this customer (INT-016), unique per tenant; a repeated create returns this customer.</summary>
+    public string? ExternalReference { get; private set; }
     public CustomerStatus Status { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public IReadOnlyCollection<CustomerContact> Contacts => _contacts.AsReadOnly();
@@ -26,8 +29,10 @@ public sealed class Customer : AggregateRoot, ITenantOwned
 
     public void SetImage(Guid? imageId) => ImageId = imageId;
 
-    public static Customer Create(Guid tenantId, string name, string? email, string? phone, string? country, string? taxNumber, DateTimeOffset now) => new()
+    public static Customer Create(Guid tenantId, string name, string? email, string? phone, string? country, string? taxNumber, DateTimeOffset now,
+        string? externalReference = null) => new()
     {
+        ExternalReference = string.IsNullOrWhiteSpace(externalReference) ? null : externalReference.Trim(),
         TenantId = tenantId,
         Name = Guard.NotEmpty(name, "Name"),
         Email = string.IsNullOrWhiteSpace(email) ? null : EmailAddress.Create(email).Value,

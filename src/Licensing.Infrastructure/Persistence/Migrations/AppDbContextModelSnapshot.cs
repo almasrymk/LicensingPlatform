@@ -222,6 +222,10 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<string>("ExternalReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<Guid?>("ImageId")
                         .HasColumnType("uniqueidentifier");
 
@@ -245,6 +249,10 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ExternalReference")
+                        .IsUnique()
+                        .HasFilter("[ExternalReference] IS NOT NULL");
 
                     b.HasIndex("TenantId", "Name");
 
@@ -602,6 +610,9 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("SubscriptionId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("SuspendedByCustomer")
+                        .HasColumnType("bit");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
@@ -633,6 +644,10 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.Property<string>("AppVersion")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("CredentialHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<Guid>("CustomerId")
                         .HasColumnType("uniqueidentifier");
@@ -719,6 +734,58 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.ToTable("SigningKeys", "licensing");
                 });
 
+            modelBuilder.Entity("Licensing.Domain.Licensing.TrialGrant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("CancelledAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("LicenseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("RedeemedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("RedeemedDeviceId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CodeHash")
+                        .IsUnique();
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("TenantId", "ProductId", "Reference");
+
+                    b.ToTable("TrialGrants", "licensing");
+                });
+
             modelBuilder.Entity("Licensing.Domain.Media.MediaFile", b =>
                 {
                     b.Property<Guid>("Id")
@@ -802,6 +869,9 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("ActiveDevices")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset?>("CancelledAt")
                         .HasColumnType("datetimeoffset");
 
@@ -814,9 +884,16 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("EndDate")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<string>("ExternalReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("OverCapacitySince")
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<Guid>("PlanId")
                         .HasColumnType("uniqueidentifier");
@@ -829,6 +906,9 @@ namespace Licensing.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
+
+                    b.Property<bool>("SuspendedByCustomer")
+                        .HasColumnType("bit");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -845,6 +925,10 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.HasIndex("Status", "EndDate");
 
                     b.HasIndex("TenantId", "CustomerId");
+
+                    b.HasIndex("TenantId", "ExternalReference")
+                        .IsUnique()
+                        .HasFilter("[ExternalReference] IS NOT NULL");
 
                     b.ToTable("Subscriptions", "subscriptions");
                 });
@@ -867,6 +951,10 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.Property<int?>("FromStatus")
                         .HasColumnType("int");
 
+                    b.Property<string>("Reference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<Guid>("SubscriptionId")
                         .HasColumnType("uniqueidentifier");
 
@@ -879,6 +967,10 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("SubscriptionId");
+
+                    b.HasIndex("SubscriptionId", "Reference")
+                        .IsUnique()
+                        .HasFilter("[Reference] IS NOT NULL");
 
                     b.ToTable("SubscriptionHistory", "subscriptions");
                 });
@@ -1024,6 +1116,8 @@ namespace Licensing.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ProcessedAt", "DeadLettered", "NextAttemptAt");
 
+                    b.HasIndex("TenantId", "OccurredAt", "Id");
+
                     b.ToTable("OutboxMessages", "messaging");
                 });
 
@@ -1063,6 +1157,15 @@ namespace Licensing.Infrastructure.Persistence.Migrations
                         .WithMany("Contacts")
                         .HasForeignKey("CustomerId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Licensing.Domain.Licensing.TrialGrant", b =>
+                {
+                    b.HasOne("Licensing.Domain.Catalog.Product", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

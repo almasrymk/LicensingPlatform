@@ -35,7 +35,8 @@ public sealed record LicenseFilter(Guid? CustomerId = null, Guid? SubscriptionId
 public sealed record ActivationFilter(string? State = null, Guid? LicenseId = null, Guid? ProductId = null, string? Os = null, Guid? TenantId = null);
 /// <summary>The only response that ever carries the full product key.</summary>
 public sealed record IssuedLicenseDto(LicenseDto License, string ProductKey);
-public sealed record LicenseActionRequest(string? Reason);
+/// <param name="ByCustomer">INT-013: as <see cref="Subscriptions.SubscriptionActionRequest"/>.</param>
+public sealed record LicenseActionRequest(string? Reason, bool ByCustomer = false);
 
 public sealed class LicenseService(
     IAppDbContext db, IProductKeyGenerator keys, ILicenseCache cache, IAuditLogger audit, ITenantContext scope, TimeProvider clock)
@@ -155,8 +156,10 @@ public sealed class LicenseService(
         license.RegenerateKey(hash, prefix);
         var activations = await db.LicenseActivations.Where(a => a.LicenseId == id && a.Status == ActivationStatus.Active).ToListAsync(ct);
         activations.ForEach(a => a.Deactivate(now));
+        activations.ForEach(a => license.ActivationReset(a.DeviceId, "key_regenerated"));
         audit.Add("license.key_regenerated", "License", id.ToString(), details: $"prefix={prefix} devices_released={activations.Count}", tenantId: license.TenantId);
         await db.SaveChangesAsync(ct);
+        await db.RecountDevicesAsync(id, ct);
         await cache.RemoveAsync(LicenseCacheKeys.For(license.TenantId, oldHash), ct);
         await cache.RemoveAsync(LicenseCacheKeys.For(license.TenantId, hash), ct);
         return new IssuedLicenseDto((await GetAsync(id, ct)).Value.License, plainKey);
@@ -187,21 +190,36 @@ public sealed class LicenseService(
     }
 
     public Task<Result<LicenseDetailsDto>> SuspendAsync(Guid id, LicenseActionRequest request, CancellationToken ct) =>
-        MutateAsync(id, "license.suspended", l => l.Suspend(request.Reason), request.Reason, ct);
+        MutateAsync(id, request.ByCustomer ? "license.suspended_by_customer" : "license.suspended", l => l.Suspend(request.Reason, request.ByCustomer), request.Reason, ct);
 
-    public Task<Result<LicenseDetailsDto>> ResumeAsync(Guid id, CancellationToken ct) =>
-        MutateAsync(id, "license.resumed", l => l.Resume(), null, ct);
+    public Task<Result<LicenseDetailsDto>> ResumeAsync(Guid id, CancellationToken ct, bool byCustomer = false) =>
+        MutateAsync(id, byCustomer ? "license.resumed_by_customer" : "license.resumed", l => l.Resume(byCustomer), null, ct);
 
+    /// <summary>
+    /// E3 (R2): revoking ends the license for good, so its seats are deactivated too (their device credentials stop
+    /// working) and the subscription capacity they held is released.
+    /// </summary>
     public Task<Result<LicenseDetailsDto>> RevokeAsync(Guid id, LicenseActionRequest request, CancellationToken ct) =>
-        MutateAsync(id, "license.revoked", l => l.Revoke(request.Reason, clock.GetUtcNow()), request.Reason, ct);
+        MutateAsync(id, "license.revoked", l => l.Revoke(request.Reason, clock.GetUtcNow()), request.Reason, ct, releaseSeats: true);
 
-    private async Task<Result<LicenseDetailsDto>> MutateAsync(Guid id, string action, Action<License> change, string? reason, CancellationToken ct)
+    private async Task<Result<LicenseDetailsDto>> MutateAsync(Guid id, string action, Action<License> change, string? reason, CancellationToken ct,
+        bool releaseSeats = false)
     {
         var license = await db.Licenses.FirstOrDefaultAsync(l => l.Id == id, ct);
         if (license is null) return AppErrors.NotFound("License");
         change(license);
-        audit.Add(action, "License", id.ToString(), details: reason, tenantId: license.TenantId);
+        var released = 0;
+        if (releaseSeats)
+        {
+            var now = clock.GetUtcNow();
+            var seats = await db.LicenseActivations.Where(a => a.LicenseId == id && a.Status == ActivationStatus.Active).ToListAsync(ct);
+            seats.ForEach(a => a.Deactivate(now));
+            released = seats.Count;
+        }
+        audit.Add(action, "License", id.ToString(), details: releaseSeats ? $"{reason} devices_released={released}".Trim() : reason, tenantId: license.TenantId);
         await db.SaveChangesAsync(ct);
+        // The license's status decides whether its devices count against the subscription (E3), so recount on every change.
+        await db.RecountDevicesAsync(id, ct);
         // Invalidate synchronously as well as through the outbox event: a revoked license must fail its next validate.
         await cache.RemoveAsync(LicenseCacheKeys.For(license.TenantId, license.ProductKeyHash), ct);
         return await GetAsync(id, ct);
@@ -218,9 +236,10 @@ public sealed class LicenseService(
             return Error.Conflict("ACTIVATION_NOT_ACTIVE", "This device is already deactivated.");
 
         activation.Deactivate(clock.GetUtcNow());
+        license.ActivationReset(activation.DeviceId, "device_reset");
         audit.Add("license.device_reset", "License", licenseId.ToString(), details: $"device={activation.DeviceId}", tenantId: license.TenantId);
         await db.SaveChangesAsync(ct);
-        await db.ReleaseActivationSlotAsync(licenseId, ct);
+        await db.RecountDevicesAsync(licenseId, ct);
         await cache.RemoveAsync(LicenseCacheKeys.For(license.TenantId, license.ProductKeyHash), ct);
         return await GetAsync(licenseId, ct);
     }
@@ -272,7 +291,8 @@ public sealed class LicenseService(
 
 public static class LicenseCacheKeys
 {
-    public static string For(Guid tenantId, string keyHash) => $"lic:{tenantId:N}:{keyHash}";
+    // "lic2": LicenseSnapshot gained SubscriptionId (INT-003); entries cached by an older build are never read back.
+    public static string For(Guid tenantId, string keyHash) => $"lic2:{tenantId:N}:{keyHash}";
 }
 
 /// <summary>Anything that changes whether a license validates (subscription, customer, tenant) drops its cached result.</summary>

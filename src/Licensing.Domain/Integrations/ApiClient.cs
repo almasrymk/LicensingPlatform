@@ -12,14 +12,28 @@ public static class ApiScopes
     public const string LicensesRead = "licenses.read";
     public const string LicensesManage = "licenses.manage";
     public const string CustomersRead = "customers.read";
+    /// <summary>E7: create and edit customers (the website's service client creates one per buying company).</summary>
+    public const string CustomersManage = "customers.manage";
     public const string SubscriptionsRead = "subscriptions.read";
     public const string SubscriptionsManage = "subscriptions.manage";
     public const string CatalogRead = "catalog.read";
+    /// <summary>B5: issue single-use trial codes to the website's signed-in customers (see <c>TrialGrant</c>).</summary>
+    public const string TrialsGrant = "trials.grant";
 
     public static readonly string[] All =
     [
         LicensesActivate, LicensesValidate, LicensesIssue, LicensesRead, LicensesManage,
-        CustomersRead, SubscriptionsRead, SubscriptionsManage, CatalogRead,
+        CustomersRead, CustomersManage, SubscriptionsRead, SubscriptionsManage, CatalogRead, TrialsGrant,
+    ];
+
+    /// <summary>
+    /// E7: portal permissions an API client may hold through the scope of the same name, so a service (the website) can use
+    /// the portal routes without a user account and password. Only these; administration (users, API clients, signing
+    /// keys, tenants, catalog changes, audit) stays with people.
+    /// </summary>
+    public static readonly string[] GrantablePermissions =
+    [
+        CatalogRead, CustomersRead, CustomersManage, SubscriptionsRead, SubscriptionsManage, LicensesRead, LicensesManage,
     ];
 }
 

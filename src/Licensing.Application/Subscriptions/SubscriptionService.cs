@@ -3,6 +3,7 @@ using Licensing.Application.Common;
 using Licensing.Application.Licensing;
 using Licensing.Domain.Catalog;
 using Licensing.Domain.Customers;
+using Licensing.Domain.Licensing;
 using Licensing.Domain.Subscriptions;
 using Licensing.SharedKernel;
 using Microsoft.EntityFrameworkCore;
@@ -12,7 +13,8 @@ namespace Licensing.Application.Subscriptions;
 public sealed record SubscriptionDto(
     Guid Id, Guid TenantId, Guid CustomerId, string CustomerName, Guid ProductId, string ProductName, Guid PlanId, string PlanName,
     int PlanVersion, SubscriptionStatus Status, DateTimeOffset StartDate, DateTimeOffset? EndDate, DateTimeOffset? TrialEndsAt,
-    bool IsLifetime, int Version, IReadOnlyList<SubscriptionAction> AllowedActions, int Licenses, DateTimeOffset CreatedAt);
+    bool IsLifetime, int Version, IReadOnlyList<SubscriptionAction> AllowedActions, int Licenses, DateTimeOffset CreatedAt,
+    int ActiveDevices = 0, int? MaxDevices = null, DateTimeOffset? OverCapacitySince = null);
 
 public sealed record SubscriptionHistoryDto(SubscriptionAction Action, SubscriptionStatus? FromStatus, SubscriptionStatus ToStatus, DateTimeOffset At, string? Details);
 public sealed record SubscriptionDetailsDto(SubscriptionDto Subscription, IReadOnlyList<SubscriptionHistoryDto> History);
@@ -20,10 +22,17 @@ public sealed record SubscriptionDetailsDto(SubscriptionDto Subscription, IReadO
 public sealed record SubscriptionFilter(Guid? CustomerId = null, SubscriptionStatus? Status = null, Guid? ProductId = null, Guid? PlanId = null,
     Guid? TenantId = null, DateTimeOffset? EndFrom = null, DateTimeOffset? EndTo = null);
 
-public sealed record StartSubscriptionRequest(Guid CustomerId, Guid PlanId, DateTimeOffset? StartDate, string? Notes);
-public sealed record RenewSubscriptionRequest(int? DurationDays, int? ExpectedVersion);
+/// <param name="ExternalReference">Optional caller id (INT-016). A repeat with the same reference returns the first subscription.</param>
+public sealed record StartSubscriptionRequest(Guid CustomerId, Guid PlanId, DateTimeOffset? StartDate, string? Notes, string? ExternalReference = null);
+/// <param name="ExternalReference">INT-018: the caller's id for this renewal (a paid order). A repeat returns the subscription unchanged.</param>
+public sealed record RenewSubscriptionRequest(int? DurationDays, int? ExpectedVersion, string? ExternalReference = null);
 public sealed record ChangePlanRequest(Guid PlanId, int? ExpectedVersion);
-public sealed record SubscriptionActionRequest(string? Reason, int? ExpectedVersion);
+/// <param name="ByCustomer">
+/// INT-013: the caller (the website's service account) acts for the customer in self-service. A suspension made this way
+/// can be resumed the same way; a resume this way is refused when the provider's staff made the suspension. The flag
+/// can only restrict a resume or mark a suspension as the customer's, so accepting it from any caller grants nothing.
+/// </param>
+public sealed record SubscriptionActionRequest(string? Reason, int? ExpectedVersion, bool ByCustomer = false);
 
 public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, ILicenseCache cache, ITenantContext scope, TimeProvider clock)
 {
@@ -35,6 +44,7 @@ public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, IL
         public required string PlanName { get; init; }
         public int PlanVersion { get; init; }
         public int Licenses { get; init; }
+        public int? MaxDevices { get; init; }
     }
 
     private IQueryable<Row> Rows(IQueryable<Subscription> q) =>
@@ -42,12 +52,12 @@ public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, IL
         join c in db.Customers on s.CustomerId equals c.Id
         join p in db.Products on s.ProductId equals p.Id
         join pl in db.Plans on s.PlanId equals pl.Id
-        select new Row { S = s, CustomerName = c.Name, ProductName = p.Name, PlanName = pl.Name, PlanVersion = pl.Version, Licenses = db.Licenses.Count(l => l.SubscriptionId == s.Id) };
+        select new Row { S = s, CustomerName = c.Name, ProductName = p.Name, PlanName = pl.Name, PlanVersion = pl.Version, Licenses = db.Licenses.Count(l => l.SubscriptionId == s.Id), MaxDevices = pl.MaxActivations };
 
     private static SubscriptionDto ToDto(Row r) => new(
         r.S.Id, r.S.TenantId, r.S.CustomerId, r.CustomerName, r.S.ProductId, r.ProductName, r.S.PlanId, r.PlanName, r.PlanVersion,
         r.S.Status, r.S.StartDate, r.S.EndDate, r.S.TrialEndsAt, r.S.IsLifetime, r.S.Version,
-        Subscription.AllowedActions(r.S.Status), r.Licenses, r.S.CreatedAt);
+        Subscription.AllowedActions(r.S.Status), r.Licenses, r.S.CreatedAt, r.S.ActiveDevices, r.MaxDevices, r.S.OverCapacitySince);
 
     public async Task<PagedResult<SubscriptionDto>> ListAsync(PageQuery page, SubscriptionFilter f, CancellationToken ct)
     {
@@ -90,21 +100,77 @@ public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, IL
         if (plan.Status != PlanStatus.Published)
             return Error.Conflict("PLAN_NOT_PUBLISHED", "Only published plans can be subscribed to.");
 
+        var reference = string.IsNullOrWhiteSpace(request.ExternalReference) ? null : request.ExternalReference.Trim();
+        if (reference is { Length: > 100 })
+            return Error.Validation("VALIDATION_FAILED", "ExternalReference must be at most 100 characters.");
+        if (reference is not null && await ReplayAsync(customer.TenantId, reference, request, ct) is { } replay)
+            return replay;
+
         var now = clock.GetUtcNow();
         var sub = Subscription.Start(customer.TenantId, customer.Id, plan.ProductId, plan.Id, request.StartDate ?? now,
-            plan.DurationDays, plan.TrialDays, now, request.Notes);
+            plan.DurationDays, plan.TrialDays, now, request.Notes, reference);
         db.Subscriptions.Add(sub);
         audit.Add("subscription.started", "Subscription", sub.Id.ToString(), details: $"plan={plan.Code} v{plan.Version}", tenantId: sub.TenantId);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException) when (reference is not null)
+        {
+            // A parallel start with the same reference won; answer with its subscription.
+            db.DiscardChanges();
+            if (await ReplayAsync(customer.TenantId, reference, request, ct) is { } raced)
+                return raced;
+            throw;
+        }
+
         return await GetAsync(sub.Id, ct);
+    }
+
+    /// <summary>The subscription an earlier start with this reference created, or a conflict if it was for another customer or plan.</summary>
+    private async Task<Result<SubscriptionDetailsDto>?> ReplayAsync(Guid tenantId, string reference, StartSubscriptionRequest request, CancellationToken ct)
+    {
+        var existing = await db.Subscriptions.AsNoTracking()
+            .Where(s => s.TenantId == tenantId && s.ExternalReference == reference)
+            .Select(s => new { s.Id, s.CustomerId, s.PlanId })
+            .FirstOrDefaultAsync(ct);
+        if (existing is null) return null;
+        if (existing.CustomerId != request.CustomerId || existing.PlanId != request.PlanId)
+            return Error.Conflict("SUBSCRIPTION_REFERENCE_CONFLICT", "This external reference already belongs to another subscription.");
+        return await GetAsync(existing.Id, ct);
     }
 
     public async Task<Result<SubscriptionDetailsDto>> RenewAsync(Guid id, RenewSubscriptionRequest request, CancellationToken ct)
     {
+        var reference = string.IsNullOrWhiteSpace(request.ExternalReference) ? null : request.ExternalReference.Trim();
+        if (reference is { Length: > 100 })
+            return Error.Validation("VALIDATION_FAILED", "ExternalReference must be at most 100 characters.");
+        if (reference is null)
+            return await RenewOnceAsync(id, request, null, ct);
+
+        // INT-018: a paid renewal is applied once per reference, even when the caller retries after a lost answer
+        // or two retries race (the reference is unique per subscription, and the version is a concurrency token).
+        try
+        {
+            return await RenewOnceAsync(id, request, reference, ct);
+        }
+        catch (DbUpdateException)
+        {
+            db.DiscardChanges();
+            if (await db.SubscriptionHistory.AnyAsync(h => h.SubscriptionId == id && h.Reference == reference, ct))
+                return await GetAsync(id, ct);
+            throw;
+        }
+    }
+
+    private async Task<Result<SubscriptionDetailsDto>> RenewOnceAsync(Guid id, RenewSubscriptionRequest request, string? reference, CancellationToken ct)
+    {
+        if (reference is not null && await db.SubscriptionHistory.AnyAsync(h => h.SubscriptionId == id && h.Reference == reference, ct))
+            return await GetAsync(id, ct);
         return await MutateAsync(id, request.ExpectedVersion, "subscription.renewed", async (sub, now) =>
         {
             var plan = await db.Plans.FirstAsync(p => p.Id == sub.PlanId, ct);
-            sub.Renew(request.DurationDays ?? plan.DurationDays, now);
+            sub.Renew(request.DurationDays ?? plan.DurationDays, now, reference);
             // Licenses follow the subscription's new end date (and come back if they expired with it).
             var licenses = await db.Licenses.Where(l => l.SubscriptionId == sub.Id).ToListAsync(ct);
             licenses.ForEach(l => { if (l.Status != Domain.Licensing.LicenseStatus.Revoked) l.Reinstate(sub.EndDate); });
@@ -114,21 +180,47 @@ public sealed class SubscriptionService(IAppDbContext db, IAuditLogger audit, IL
 
     public async Task<Result<SubscriptionDetailsDto>> ChangePlanAsync(Guid id, ChangePlanRequest request, CancellationToken ct)
     {
+        var changed = await ChangePlanCoreAsync(id, request, ct);
+        if (changed.IsFailure) return changed;
+        // B4: the new plan's limit decides whether the subscription is over capacity (flag + change-feed event).
+        await db.RecountSubscriptionDevicesAsync(id, ct);
+        // The recount writes the counters and the flag directly, so read them fresh rather than from the tracked row.
+        db.DiscardChanges();
+        return await GetAsync(id, ct);
+    }
+
+    private async Task<Result<SubscriptionDetailsDto>> ChangePlanCoreAsync(Guid id, ChangePlanRequest request, CancellationToken ct)
+    {
         return await MutateAsync(id, request.ExpectedVersion, "subscription.plan_changed", async (sub, now) =>
         {
             var plan = await db.Plans.FirstOrDefaultAsync(p => p.Id == request.PlanId, ct);
             if (plan is null || plan.ProductId != sub.ProductId) return AppErrors.NotFound("Plan");
             if (plan.Status != PlanStatus.Published) return Error.Conflict("PLAN_NOT_PUBLISHED", "Only published plans can be used.");
             sub.ChangePlan(plan.Id, plan.DurationDays, now);
+
+            // E4: every license that is not revoked follows the new plan (entitlements, features, expiry), and each
+            // change enters the change feed, so Monitor Cloud refreshes the tenant and pushes new tokens to its agents.
+            var productCode = await db.Products.Where(p => p.Id == sub.ProductId).Select(p => p.Code).FirstAsync(ct);
+            var licenses = await db.Licenses.Where(l => l.SubscriptionId == sub.Id && l.Status != LicenseStatus.Revoked).ToListAsync(ct);
+            foreach (var license in licenses)
+                license.ApplyPlan(plan.Id, plan.ToEntitlements(productCode), sub.EndDate);
+
+            // B4: a downgrade below the devices in use is recorded and the subscription is marked over capacity by the
+            // recount; nothing is deactivated or deleted. New activations are refused until it is back under its limit.
+            if (plan.MaxActivations is { } limit && sub.ActiveDevices > limit)
+                audit.Add("subscription.over_capacity", "Subscription", sub.Id.ToString(),
+                    details: $"plan={plan.Code} limit={limit} active_devices={sub.ActiveDevices}", tenantId: sub.TenantId);
             return null;
         }, ct);
     }
 
     public Task<Result<SubscriptionDetailsDto>> SuspendAsync(Guid id, SubscriptionActionRequest request, CancellationToken ct) =>
-        MutateAsync(id, request.ExpectedVersion, "subscription.suspended", (sub, now) => { sub.Suspend(request.Reason, now); return Task.FromResult<Error?>(null); }, ct);
+        MutateAsync(id, request.ExpectedVersion, request.ByCustomer ? "subscription.suspended_by_customer" : "subscription.suspended",
+            (sub, now) => { sub.Suspend(request.Reason, now, request.ByCustomer); return Task.FromResult<Error?>(null); }, ct);
 
     public Task<Result<SubscriptionDetailsDto>> ResumeAsync(Guid id, SubscriptionActionRequest request, CancellationToken ct) =>
-        MutateAsync(id, request.ExpectedVersion, "subscription.resumed", (sub, now) => { sub.Resume(now); return Task.FromResult<Error?>(null); }, ct);
+        MutateAsync(id, request.ExpectedVersion, request.ByCustomer ? "subscription.resumed_by_customer" : "subscription.resumed",
+            (sub, now) => { sub.Resume(now, request.ByCustomer); return Task.FromResult<Error?>(null); }, ct);
 
     public Task<Result<SubscriptionDetailsDto>> CancelAsync(Guid id, SubscriptionActionRequest request, CancellationToken ct) =>
         MutateAsync(id, request.ExpectedVersion, "subscription.cancelled", (sub, now) => { sub.Cancel(request.Reason, now); return Task.FromResult<Error?>(null); }, ct);
