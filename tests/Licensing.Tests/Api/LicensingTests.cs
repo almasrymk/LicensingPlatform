@@ -780,3 +780,54 @@ public sealed class DeviceTrialTests : IClassFixture<TestAppFixture>
         Assert.Equal("LIC_TRIAL_UNAVAILABLE", await response.ErrorCodeAsync());
     }
 }
+
+/// <summary>A message that keeps failing is dead-lettered, audited, and turns /health/outbox unhealthy until resolved.</summary>
+public sealed class OutboxDeadLetterTests : IClassFixture<TestAppFixture>
+{
+    private readonly TestApp _app;
+    public OutboxDeadLetterTests(TestAppFixture f) => _app = f.App;
+
+    [Fact]
+    public async Task A_dead_lettered_message_is_audited_and_reported_by_the_outbox_health_check()
+    {
+        var anonymous = _app.Anonymous();
+        var id = Guid.CreateVersion7();
+        var maxAttempts = _app.Get<Microsoft.Extensions.Options.IOptions<OutboxOptions>>().Value.MaxAttempts;
+        await _app.WithDbAsync(async db =>
+        {
+            db.OutboxMessages.Add(new Licensing.Infrastructure.Persistence.OutboxMessage
+            {
+                Id = id, Type = "NoSuchEventV1", Payload = "{}", OccurredAt = _app.Clock.GetUtcNow().AddMinutes(-1),
+                Attempts = maxAttempts - 1,
+            });
+            return await db.SaveChangesAsync();
+        });
+
+        try
+        {
+            await _app.Get<OutboxProcessor>().ProcessBatchAsync(default);
+
+            var message = await _app.WithDbAsync(db => db.OutboxMessages.FirstAsync(m => m.Id == id));
+            Assert.True(message.DeadLettered);
+            var audit = await _app.WithDbAsync(db => db.AuditRecords.Where(a => a.Action == "outbox.dead_lettered" && a.EntityId == id.ToString()).ToListAsync());
+            var entry = Assert.Single(audit);
+            Assert.False(entry.Success);
+            Assert.Contains("NoSuchEventV1", entry.Details);
+
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, (await anonymous.GetAsync("/health/outbox")).StatusCode);
+            // Readiness is unaffected: one stuck event must not take the API out of the load balancer.
+            Assert.Equal(HttpStatusCode.OK, (await anonymous.GetAsync("/health/live")).StatusCode);
+        }
+        finally
+        {
+            // Resolving the message (replayed or handled by an operator) clears the alert.
+            await _app.WithDbAsync(async db =>
+            {
+                var m = await db.OutboxMessages.FirstAsync(x => x.Id == id);
+                m.ProcessedAt = _app.Clock.GetUtcNow();
+                return await db.SaveChangesAsync();
+            });
+        }
+        Assert.Equal(HttpStatusCode.OK, (await anonymous.GetAsync("/health/outbox")).StatusCode);
+    }
+}

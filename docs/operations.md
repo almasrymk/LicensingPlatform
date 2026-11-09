@@ -56,6 +56,7 @@ dotnet ef migrations script --idempotent -p src/Licensing.Infrastructure -s src/
 ## المراقبة والتنبيهات المقترحة
 - معدل 5xx > 1% لمدة 5 دقائق، وp95 لـ `/licensing/validate` > 300ms.
 - `OutboxMessages` غير المعالجة > 1000 أو أي رسالة `DeadLettered = 1`.
+  - عند وصول رسالة لـ dead-letter يُكتب سجل Audit بالإجراء `outbox.dead_lettered`، ويرجع `GET /health/outbox` بالحالة 503 حتى تُعالج الرسالة. اربط مراقب uptime خارجي بهذا المسار ليرسل التنبيه (البريد أو الرسائل خارج المنصة، ويحتاج إعداداً من المالك). `/health/ready` لا يتأثر.
 - محاولات تفعيل فاشلة لـ tenant واحد > 100 في الساعة (إساءة استخدام محتملة).
 - استخدام CPU/IO للـ SQL Server > 80%.
 
