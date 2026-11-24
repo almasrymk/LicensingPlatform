@@ -1,0 +1,193 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Licensing.Api</name>
+    </assembly>
+    <members>
+        <member name="M:Licensing.Api.Controllers.AuthController.Login(Licensing.Application.Identity.LoginRequest,System.Threading.CancellationToken)">
+            <summary>Signs a portal user in. Returns a short-lived access token and a rotating refresh token.</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.AuthController.Refresh(Licensing.Application.Identity.RefreshRequest,System.Threading.CancellationToken)">
+            <summary>Exchanges a refresh token for a new pair. The presented token is revoked; reusing it revokes the whole session.</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.AuthController.ClientToken(Licensing.Application.Identity.ClientTokenRequest,System.Threading.CancellationToken)">
+            <summary>OAuth2-style client credentials for API clients. The token carries tenant_id, client_id and scopes.</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.PlansController.Entitlements(System.Guid,System.Threading.CancellationToken)">
+            <summary>The plan as machine-readable entitlements (what a license issued from it grants).</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.PlansController.MakeCurrent(System.Guid,System.Threading.CancellationToken)">
+            <summary>Makes a published free plan the one currently offered for its product.</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.LicensesController.Issue(Licensing.Application.Licensing.IssueLicenseRequest,System.Threading.CancellationToken)">
+            <summary>Issues a license. The response is the only time the full product key is returned.</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.LicensesController.RegenerateKey(System.Guid,System.Threading.CancellationToken)">
+            <summary>Replaces the product key (e.g. after a leak). Releases every device; the new key is returned once.</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.LicensesController.Activations(Licensing.Application.Common.PageQuery,Licensing.Application.Licensing.ActivationFilter,System.Threading.CancellationToken)">
+            <summary>All activated devices (Activations / Devices screen).</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.ApiClientsController.Create(Licensing.Application.Integrations.CreateApiClientRequest,System.Threading.CancellationToken)">
+            <summary>Creates a client. The secret is returned once and stored hashed.</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.ReportsController.Trend(System.String,System.Nullable{System.Int32},System.Threading.CancellationToken)">
+            <summary>Revenue and running subscriptions per month of a year (granularity=monthly) or per year (yearly).</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.SigningKeysController.PublicKeys(System.Threading.CancellationToken)">
+            <summary>Public keys that verify offline license tokens (active and retiring). Clients cache this and select by kid.</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.SigningKeysController.Rotate(System.Threading.CancellationToken)">
+            <summary>Rotates the license-signing key. The previous key keeps verifying (status "retiring").</summary>
+        </member>
+        <member name="T:Licensing.Api.Controllers.LicensingController">
+            <summary>
+            Endpoints called by licensed software (ADR-011): authenticated with an API client token, scoped to the client's tenant,
+            rate limited per client.
+            </summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.LicensingController.#ctor(Licensing.Application.Licensing.DeviceLicensingService,Licensing.Application.Abstractions.IIdempotencyStore,Licensing.Application.Abstractions.ICurrentUser)">
+            <summary>
+            Endpoints called by licensed software (ADR-011): authenticated with an API client token, scoped to the client's tenant,
+            rate limited per client.
+            </summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.LicensingController.Activate(Licensing.Application.Licensing.ActivateRequest,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Activates a device. Send an <c>Idempotency-Key</c> header so a retried request returns the original result
+            instead of consuming another activation.
+            </summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.LicensingController.Validate(Licensing.Application.Licensing.ValidateRequest,System.Threading.CancellationToken)">
+            <summary>Checks a license for an activated device. Served from a short-lived cache that is invalidated on any status change.</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.LicensingController.Heartbeat(Licensing.Application.Licensing.ValidateRequest,System.Threading.CancellationToken)">
+            <summary>Periodic check-in. Always reads the database and returns a fresh signed token.</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.LicensingController.Trial(Licensing.Application.Licensing.TrialRequest,System.Threading.CancellationToken)">
+            <summary>
+            Starts this device's one trial of a product, for the product's trial days. The product key is in the
+            response only this once; a device that already had a trial gets <c>LIC_TRIAL_USED</c>.
+            </summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.LicensingController.Free(Licensing.Application.Licensing.TrialRequest,System.Threading.CancellationToken)">
+            <summary>
+            Gives this device the product's current free plan. The product key is in the response only this once; a device that
+            already has its free license gets <c>LIC_FREE_USED</c>.
+            </summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.LicensingController.Deactivate(Licensing.Application.Licensing.DeactivateRequest,System.Threading.CancellationToken)">
+            <summary>Releases this device's activation slot.</summary>
+        </member>
+        <member name="T:Licensing.Api.Controllers.MediaController">
+            <summary>Logos and photos. Uploads need the same permission as editing the record; images are served by unguessable id.</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.MediaController.#ctor(Licensing.Application.Media.MediaService,Licensing.Application.Abstractions.ICurrentUser)">
+            <summary>Logos and photos. Uploads need the same permission as editing the record; images are served by unguessable id.</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.MediaController.Get(System.Guid,System.Threading.CancellationToken)">
+            <summary>Serves an uploaded image. Ids are random, so the URL can be used directly in &lt;img&gt;.</summary>
+        </member>
+        <member name="M:Licensing.Api.Controllers.MediaController.Me(Microsoft.AspNetCore.Http.IFormFile,System.Threading.CancellationToken)">
+            <summary>Any signed-in user can set their own photo.</summary>
+        </member>
+        <member name="T:Licensing.Api.Infrastructure.ApiResults">
+            <summary>Maps application results to HTTP. Every error body is RFC 7807 ProblemDetails with a stable <c>code</c> and the <c>traceId</c>.</summary>
+        </member>
+        <member name="T:Licensing.Api.Infrastructure.HasPermissionAttribute">
+            <summary>Requires a portal user whose role grants the permission. Enforced server-side whatever the UI shows.</summary>
+        </member>
+        <member name="M:Licensing.Api.Infrastructure.HasPermissionAttribute.#ctor(System.String)">
+            <summary>Requires a portal user whose role grants the permission. Enforced server-side whatever the UI shows.</summary>
+        </member>
+        <member name="T:Licensing.Api.Infrastructure.RequireScopeAttribute">
+            <summary>Requires an API client token that carries the scope.</summary>
+        </member>
+        <member name="M:Licensing.Api.Infrastructure.RequireScopeAttribute.#ctor(System.String)">
+            <summary>Requires an API client token that carries the scope.</summary>
+        </member>
+        <member name="T:Licensing.Api.Infrastructure.ProblemAuthorizationResultHandler">
+            <summary>Writes 401/403 as ProblemDetails with AUTH_UNAUTHORIZED / AUTH_FORBIDDEN codes.</summary>
+        </member>
+        <member name="T:Licensing.Api.Infrastructure.GlobalExceptionHandler">
+            <summary>Turns exceptions into ProblemDetails. Domain rule violations keep their code; anything else is a generic 500.</summary>
+        </member>
+        <member name="M:Licensing.Api.Infrastructure.GlobalExceptionHandler.#ctor(Microsoft.Extensions.Logging.ILogger{Licensing.Api.Infrastructure.GlobalExceptionHandler})">
+            <summary>Turns exceptions into ProblemDetails. Domain rule violations keep their code; anything else is a generic 500.</summary>
+        </member>
+        <member name="M:Licensing.Api.Infrastructure.GlobalExceptionHandler.RecordAsync(Microsoft.AspNetCore.Http.HttpContext,System.Exception)">
+            <summary>
+            Also stores the failure in the audit log ("system.error"), so admins can read the cause in the portal on hosts where
+            log files are hard to reach. Never lets a logging failure hide the original error.
+            </summary>
+        </member>
+        <member name="T:Licensing.Api.Infrastructure.ValidationFilter">
+            <summary>Runs FluentValidation validators for every action argument that has one (the validation pipeline).</summary>
+        </member>
+        <member name="M:Licensing.Api.Infrastructure.ValidationFilter.#ctor(System.IServiceProvider)">
+            <summary>Runs FluentValidation validators for every action argument that has one (the validation pipeline).</summary>
+        </member>
+        <member name="T:Licensing.Api.Infrastructure.CorrelationIdMiddleware">
+            <summary>Accepts or creates X-Correlation-Id and pushes it to the log context and the response.</summary>
+        </member>
+        <member name="M:Licensing.Api.Infrastructure.CorrelationIdMiddleware.#ctor(Microsoft.AspNetCore.Http.RequestDelegate)">
+            <summary>Accepts or creates X-Correlation-Id and pushes it to the log context and the response.</summary>
+        </member>
+        <member name="T:Licensing.Api.Infrastructure.RateLimits">
+            <summary>
+            Rate limits of plan section 28. Partitioned per IP for anonymous endpoints and per API client for licensing.
+            In-process counters; a multi-instance deployment moves them to Redis (see docs/operations.md).
+            </summary>
+        </member>
+        <member name="T:DatabaseHealthCheck">
+            <summary>Readiness: the database answers.</summary>
+        </member>
+        <member name="M:DatabaseHealthCheck.#ctor(Licensing.Infrastructure.Persistence.AppDbContext)">
+            <summary>Readiness: the database answers.</summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.CreateDocumentationId(System.Type)">
+            <summary>
+            Generates a documentation comment ID for a type.
+            Example: T:Namespace.Outer+Inner`1 becomes T:Namespace.Outer.Inner`1
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.CreateDocumentationId(System.Reflection.PropertyInfo)">
+            <summary>
+            Generates a documentation comment ID for a property.
+            Example: P:Namespace.ContainingType.PropertyName or for an indexer P:Namespace.ContainingType.Item(System.Int32)
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.CreateDocumentationId(System.Type,System.String)">
+            <summary>
+            Generates a documentation comment ID for a property given its container type and property name.
+            Example: P:Namespace.ContainingType.PropertyName
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.CreateDocumentationId(System.Reflection.MethodInfo)">
+            <summary>
+            Generates a documentation comment ID for a method (or constructor).
+            For example:
+              M:Namespace.ContainingType.MethodName(ParamType1,ParamType2)~ReturnType
+              M:Namespace.ContainingType.#ctor(ParamType)
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.GetTypeDocId(System.Type,System.Boolean,System.Boolean)">
+            <summary>
+            Generates a documentation ID string for a type.
+            This method handles nested types (replacing '+' with '.'),
+            generic types, arrays, pointers, by-ref types, and generic parameters.
+            The <paramref name="includeGenericArguments"/> flag controls whether
+            constructed generic type arguments are emitted, while <paramref name="omitGenericArity"/>
+            controls whether the generic arity marker (e.g. "`1") is appended.
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.NormalizeDocId(System.String)">
+            <summary>
+            Normalizes a documentation comment ID to match the compiler-style format.
+            Strips the return type suffix for ordinary methods but retains it for conversion operators.
+            </summary>
+            <param name="docId">The documentation comment ID to normalize.</param>
+            <returns>The normalized documentation comment ID.</returns>
+        </member>
+    </members>
+</doc>
