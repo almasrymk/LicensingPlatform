@@ -293,10 +293,12 @@ public sealed class PermissionTests : IClassFixture<TestAppFixture>
     }
 
     [Fact]
-    public async Task Api_client_tokens_cannot_call_portal_endpoints()
+    public async Task Api_client_tokens_cannot_call_portal_administration_endpoints()
     {
+        // E7: a client may use the portal routes its scopes grant (ServiceClientTests); administration routes stay user-only.
         var client = await _app.ClientTokenAsync(DemoAccounts.NourClientId, DemoAccounts.NourClientSecret);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/customers")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/users")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/api-clients")).StatusCode);
     }
 
     [Fact]

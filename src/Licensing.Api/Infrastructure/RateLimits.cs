@@ -12,6 +12,9 @@ public sealed class RateLimitOptions
     public int LoginPerMinute { get; set; } = 10;
     public int ClientTokenPerMinute { get; set; } = 30;
     public int LicensingPerMinute { get; set; } = 300;
+
+    /// <summary>INT-002: anonymous product-key / device-credential routes, per IP.</summary>
+    public int DeviceLicensingPerMinute { get; set; } = 30;
 }
 
 /// <summary>
@@ -23,6 +26,7 @@ public static class RateLimits
     public const string Login = "login";
     public const string ClientToken = "client-token";
     public const string Licensing = "licensing";
+    public const string DeviceLicensing = "device-licensing";
 
     private static RateLimitOptions Limits(HttpContext http) =>
         http.RequestServices.GetRequiredService<Microsoft.Extensions.Options.IOptions<RateLimitOptions>>().Value;
@@ -50,6 +54,13 @@ public static class RateLimits
             options.AddPolicy(ClientToken, http => RateLimitPartition.GetFixedWindowLimiter(
                 "ip:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = Limits(http).ClientTokenPerMinute, Window = TimeSpan.FromMinutes(1) }));
+
+            options.AddPolicy(DeviceLicensing, http => RateLimitPartition.GetSlidingWindowLimiter(
+                "device-ip:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
+                _ => new SlidingWindowRateLimiterOptions
+                {
+                    PermitLimit = Limits(http).DeviceLicensingPerMinute, Window = TimeSpan.FromMinutes(1), SegmentsPerWindow = 6,
+                }));
 
             options.AddPolicy(Licensing, http => RateLimitPartition.GetSlidingWindowLimiter(
                 "client:" + (http.User.FindFirst(ClaimNames.ClientId)?.Value ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),

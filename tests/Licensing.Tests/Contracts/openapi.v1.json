@@ -2465,6 +2465,46 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LicenseActionRequest"
+                  }
+                ]
+              }
+            },
+            "text/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LicenseActionRequest"
+                  }
+                ]
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LicenseActionRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK"
@@ -3301,6 +3341,279 @@
         }
       }
     },
+    "/api/v1/licensing/device/activate": {
+      "post": {
+        "tags": [
+          "Licensing (device credential)"
+        ],
+        "summary": "Activates this device with a product key and returns \u0060{ license, deviceCredential }\u0060. The credential is\nshown only here. E7: activating a device that already has a credential needs that credential in the header (it is\nthen replaced); without it the answer is \u0060LIC_DEVICE_CREDENTIAL_EXISTS\u0060 and the license owner resets the device.",
+        "parameters": [
+          {
+            "name": "X-Device-Credential",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/licensing/device/trial": {
+      "post": {
+        "tags": [
+          "Licensing (device credential)"
+        ],
+        "summary": "B5: starts this device\u0027s one trial with the single-use code the customer got on the website, and returns\n\u0060{ productKey, license, trialDays, deviceCredential }\u0060 (key and credential shown only here). No shared secret.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceTrialRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceTrialRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceTrialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/licensing/device/rotate": {
+      "post": {
+        "tags": [
+          "Licensing (device credential)"
+        ],
+        "summary": "E7: replaces this device\u0027s credential. Needs the current one; the old one stops working at once.",
+        "parameters": [
+          {
+            "name": "X-Device-Credential",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/licensing/device/claim": {
+      "post": {
+        "tags": [
+          "Licensing (device credential)"
+        ],
+        "summary": "For an installation already activated through an API client: returns a credential for the seat it holds, without\ntaking a new slot. \u0060LIC_DEVICE_NOT_ACTIVATED\u0060 when the device has no active seat; E7:\n\u0060LIC_DEVICE_CREDENTIAL_EXISTS\u0060 when the seat already has a credential (claim works once per seat).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/licensing/device/validate": {
+      "post": {
+        "tags": [
+          "Licensing (device credential)"
+        ],
+        "parameters": [
+          {
+            "name": "X-Device-Credential",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/licensing/device/heartbeat": {
+      "post": {
+        "tags": [
+          "Licensing (device credential)"
+        ],
+        "parameters": [
+          {
+            "name": "X-Device-Credential",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/licensing/device/deactivate": {
+      "post": {
+        "tags": [
+          "Licensing (device credential)"
+        ],
+        "parameters": [
+          {
+            "name": "X-Device-Credential",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/integration/customers": {
       "get": {
         "tags": [
@@ -3386,6 +3699,41 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/integration/changes": {
+      "get": {
+        "tags": [
+          "Integration"
+        ],
+        "summary": "INT-006: the tenant\u0027s changes ordered by (occurredAt, id); types are the domain event names (*V1). Pass\nnextCursor back unchanged; an unknown cursor is INTEGRATION_CURSOR_INVALID (start again without one).",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "take",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32",
+              "default": 100
             }
           }
         ],
@@ -3774,6 +4122,150 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LicenseActionRequest"
+                  }
+                ]
+              }
+            },
+            "text/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LicenseActionRequest"
+                  }
+                ]
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LicenseActionRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/integration/licenses/{id}/devices/{deviceId}/heartbeat": {
+      "post": {
+        "tags": [
+          "Integration"
+        ],
+        "summary": "INT-004: heartbeat of a seat held by Monitor Cloud; answers like \u0060/licensing/heartbeat\u0060.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "deviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SeatHeartbeatRequest"
+                  }
+                ]
+              }
+            },
+            "text/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SeatHeartbeatRequest"
+                  }
+                ]
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SeatHeartbeatRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/integration/licenses/{id}/devices/{deviceId}/release": {
+      "post": {
+        "tags": [
+          "Integration"
+        ],
+        "summary": "INT-005: gives a seat back. 204, or \u0060LIC_DEVICE_NOT_ACTIVATED\u0060 when the device holds none.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "deviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK"
@@ -3953,6 +4445,39 @@
             "application/*\u002Bjson": {
               "schema": {
                 "$ref": "#/components/schemas/TrialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/licensing/trial-grants": {
+      "post": {
+        "tags": [
+          "Licensing (devices)"
+        ],
+        "summary": "B5: a single-use trial code for one of the website\u0027s signed-in customers (\u0060reference\u0060, one trial each). The\ncustomer enters it in the Agent, which redeems it on \u0060device/trial\u0060 without an API client. Shown only once.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueTrialGrantRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueTrialGrantRequest"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueTrialGrantRequest"
               }
             }
           },
@@ -5216,6 +5741,83 @@
           }
         }
       },
+      "DeviceCheckRequest": {
+        "required": [
+          "licenseId",
+          "deviceId",
+          "appVersion"
+        ],
+        "type": "object",
+        "properties": {
+          "licenseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceId": {
+            "type": "string"
+          },
+          "appVersion": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "os": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "DeviceTrialRequest": {
+        "required": [
+          "trialCode",
+          "deviceId",
+          "deviceName",
+          "productCode",
+          "appVersion"
+        ],
+        "type": "object",
+        "properties": {
+          "trialCode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "deviceId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "deviceName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "productCode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "appVersion": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "os": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "ExpiringLicenseDto": {
         "required": [
           "licenseId",
@@ -5506,6 +6108,27 @@
           }
         }
       },
+      "IssueTrialGrantRequest": {
+        "required": [
+          "productCode",
+          "reference"
+        ],
+        "type": "object",
+        "properties": {
+          "productCode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reference": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "KpiDto": {
         "required": [
           "value",
@@ -5554,6 +6177,10 @@
               "null",
               "string"
             ]
+          },
+          "byCustomer": {
+            "type": "boolean",
+            "default": false
           }
         }
       },
@@ -6533,6 +7160,12 @@
               "string"
             ],
             "format": "int32"
+          },
+          "externalReference": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -6590,6 +7223,12 @@
               "string"
             ],
             "format": "uuid"
+          },
+          "externalReference": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -6735,6 +7374,27 @@
           }
         }
       },
+      "SeatHeartbeatRequest": {
+        "required": [
+          "appVersion",
+          "os"
+        ],
+        "type": "object",
+        "properties": {
+          "appVersion": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "os": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "SetCustomerStatusRequest": {
         "required": [
           "status"
@@ -6775,6 +7435,12 @@
               "null",
               "string"
             ]
+          },
+          "externalReference": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -6802,6 +7468,10 @@
               "string"
             ],
             "format": "int32"
+          },
+          "byCustomer": {
+            "type": "boolean",
+            "default": false
           }
         }
       },
@@ -6913,6 +7583,31 @@
           },
           "createdAt": {
             "type": "string",
+            "format": "date-time"
+          },
+          "activeDevices": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 0
+          },
+          "maxDevices": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "overCapacitySince": {
+            "type": [
+              "null",
+              "string"
+            ],
             "format": "date-time"
           }
         }
@@ -7402,6 +8097,9 @@
     },
     {
       "name": "Licensing"
+    },
+    {
+      "name": "Licensing (device credential)"
     },
     {
       "name": "Integration"

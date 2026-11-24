@@ -12,9 +12,14 @@ namespace Licensing.Application.Integrations;
 /// </summary>
 public sealed record IntegrationCustomer(Guid Id, string Name, string? Email, string? Phone, string? Country, string Status, DateTimeOffset CreatedAt);
 
+/// <param name="MaxDevices">INT-015 (ADR-004): the plan's device limit for the whole subscription (all its licenses); null = unlimited.</param>
+/// <param name="ActiveDevices">Devices active across the subscription's licenses.</param>
+/// <param name="DeviceLimitScope">Always "Subscription": tells a caller that MaxDevices is per subscription, not a sum of licenses.</param>
+/// <param name="OverCapacitySince">B4: set while more devices are active than MaxDevices; new activations are refused until it clears.</param>
 public sealed record IntegrationSubscription(
     Guid Id, string Status, Guid PlanId, string PlanCode, string PlanName, int PlanVersion, IReadOnlyList<string> Features,
-    DateTimeOffset StartDate, DateTimeOffset? EndDate, DateTimeOffset? TrialEndsAt);
+    DateTimeOffset StartDate, DateTimeOffset? EndDate, DateTimeOffset? TrialEndsAt,
+    int? MaxDevices = null, int ActiveDevices = 0, string DeviceLimitScope = "Subscription", DateTimeOffset? OverCapacitySince = null);
 
 public sealed record IntegrationLicense(
     Guid Id, string LicenseNumber, Guid SubscriptionId, string Status, DateTimeOffset? ExpiresAt,
@@ -89,7 +94,8 @@ public sealed class IntegrationReadService(IAppDbContext db)
             {
                 var plan = plans[s.PlanId];
                 return new IntegrationSubscription(
-                    s.Id, s.Status.ToString(), plan.Id, plan.Code, plan.Name, plan.Version, plan.Features, s.StartDate, s.EndDate, s.TrialEndsAt);
+                    s.Id, s.Status.ToString(), plan.Id, plan.Code, plan.Name, plan.Version, plan.Features, s.StartDate, s.EndDate, s.TrialEndsAt,
+                    plan.MaxActivations, s.ActiveDevices, OverCapacitySince: s.OverCapacitySince);
             }).ToList(),
             licenses.Select(l => new IntegrationLicense(
                 l.Id, l.LicenseNumber, l.SubscriptionId, l.Status.ToString(), l.ExpiresAt, l.MaxActivations, l.ActiveActivations, l.Features)).ToList());

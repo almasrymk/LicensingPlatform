@@ -271,7 +271,7 @@ public sealed class DbInitializer(
             db.LicenseActivations.Add(a);
             db.ActivationAttempts.Add(ActivationAttempt.Record(l.TenantId, l, l.ProductKeyPrefix, deviceId, null, "41.33.10.10", at));
             await db.SaveChangesAsync(ct);
-            await db.TryReserveActivationSlotAsync(l.Id, ct);
+            await db.RecountDevicesAsync(l.Id, ct);
         }
     }
 }

@@ -71,9 +71,12 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
 
 builder.Services.AddHealthChecks()
     .AddCheck("self", () => HealthCheckResult.Healthy(), tags: ["live"])
-    .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
+    .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"])
+    .AddCheck<ProductionReadinessHealthCheck>("production-configuration", tags: ["ready"])
+    .AddCheck<Licensing.Infrastructure.Messaging.OutboxHealthCheck>("outbox", tags: ["outbox"]);
 
 var app = builder.Build();
+ProductionReadiness.Verify(app.Configuration, app.Environment, app.Logger);
 
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<SecurityHeadersMiddleware>();
@@ -97,6 +100,7 @@ app.MapOpenApi("/openapi/{documentName}.json");
 app.MapControllers();
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = r => r.Tags.Contains("live") });
 app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = r => r.Tags.Contains("ready") });
+app.MapHealthChecks("/health/outbox", new HealthCheckOptions { Predicate = r => r.Tags.Contains("outbox") });
 
 // Serve the built Angular portal (copied to wwwroot by the release build) with SPA fallback.
 app.UseDefaultFiles();

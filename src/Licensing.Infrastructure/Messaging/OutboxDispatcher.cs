@@ -1,10 +1,12 @@
 using System.Text.Json;
+using Licensing.Application.Abstractions;
 using Licensing.Application.Events;
 using Licensing.Infrastructure.Identity;
 using Licensing.Infrastructure.Persistence;
 using Licensing.SharedKernel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -62,6 +64,11 @@ public sealed class OutboxProcessor(IServiceScopeFactory scopes, IOptions<Outbox
                 logger.Log(message.DeadLettered ? LogLevel.Error : LogLevel.Warning, ex,
                     "Outbox message {MessageId} ({Type}) failed, attempt {Attempt}{DeadLetter}",
                     message.Id, message.Type, message.Attempts, message.DeadLettered ? " - dead-lettered" : "");
+                // Dead-letter notification: an audit entry staff see in the audit screen (saved with the message),
+                // and /health/outbox turns unhealthy so the uptime monitor alerts (docs/operations.md).
+                if (message.DeadLettered)
+                    scope.ServiceProvider.GetRequiredService<IAuditLogger>().Add("outbox.dead_lettered", "OutboxMessage",
+                        message.Id.ToString(), success: false, details: $"{message.Type} after {message.Attempts} attempts", tenantId: message.TenantId);
             }
             await db.SaveChangesAsync(ct);
         }
@@ -94,6 +101,23 @@ public sealed class OutboxProcessor(IServiceScopeFactory scopes, IOptions<Outbox
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
         }
+    }
+}
+
+/// <summary>
+/// Unhealthy while any outbox message is dead-lettered, so an external uptime monitor that polls
+/// <c>/health/outbox</c> raises an alert. It is not part of <c>/health/ready</c>: a stuck event must not take the API
+/// out of the load balancer.
+/// </summary>
+public sealed class OutboxHealthCheck(AppDbContext db) : IHealthCheck
+{
+    public async Task<HealthCheckResult> CheckHealthAsync(
+        HealthCheckContext context, CancellationToken cancellationToken = default)
+    {
+        var dead = await db.OutboxMessages.CountAsync(m => m.DeadLettered && m.ProcessedAt == null, cancellationToken);
+        return dead == 0
+            ? HealthCheckResult.Healthy()
+            : HealthCheckResult.Unhealthy($"{dead} dead-lettered outbox message(s) need attention.");
     }
 }
 

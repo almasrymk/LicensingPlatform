@@ -22,7 +22,8 @@ public sealed record CustomerFilter(CustomerStatus? Status = null, string? Count
 
 public sealed record CustomerDetailsDto(CustomerDto Customer, IReadOnlyList<ContactDto> Contacts);
 
-public sealed record SaveCustomerRequest(string Name, string? Email, string? Phone, string? Country, string? TaxNumber, Guid? TenantId = null);
+/// <param name="ExternalReference">Create only (INT-016): the caller's own id. A repeat with the same reference returns the first customer.</param>
+public sealed record SaveCustomerRequest(string Name, string? Email, string? Phone, string? Country, string? TaxNumber, Guid? TenantId = null, string? ExternalReference = null);
 public sealed record AddContactRequest(string Name, string? Email, string? Phone, string? JobTitle, bool IsPrimary);
 public sealed record SetCustomerStatusRequest(CustomerStatus Status);
 
@@ -75,12 +76,33 @@ public sealed class CustomerService(IAppDbContext db, ICurrentUser me, ITenantCo
         if (tenant.IsFailure) return tenant.Error!;
         if (!await db.Tenants.AnyAsync(t => t.Id == tenant.Value, ct)) return AppErrors.NotFound("Tenant");
 
-        var customer = Customer.Create(tenant.Value, request.Name, request.Email, request.Phone, request.Country, request.TaxNumber, clock.GetUtcNow());
+        var reference = string.IsNullOrWhiteSpace(request.ExternalReference) ? null : request.ExternalReference.Trim();
+        if (reference is { Length: > 100 })
+            return Error.Validation("VALIDATION_FAILED", "ExternalReference must be at most 100 characters.");
+        if (reference is not null && await ByReferenceAsync(tenant.Value, reference, ct) is { } known)
+            return await GetAsync(known, ct);
+
+        var customer = Customer.Create(tenant.Value, request.Name, request.Email, request.Phone, request.Country, request.TaxNumber, clock.GetUtcNow(), reference);
         db.Customers.Add(customer);
         audit.Add("customer.created", "Customer", customer.Id.ToString(), tenantId: customer.TenantId);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException) when (reference is not null)
+        {
+            // A parallel create with the same reference won; answer with its customer.
+            db.DiscardChanges();
+            if (await ByReferenceAsync(tenant.Value, reference, ct) is { } raced)
+                return await GetAsync(raced, ct);
+            throw;
+        }
+
         return await GetAsync(customer.Id, ct);
     }
+
+    private Task<Guid?> ByReferenceAsync(Guid tenantId, string reference, CancellationToken ct) =>
+        db.Customers.AsNoTracking().Where(c => c.TenantId == tenantId && c.ExternalReference == reference).Select(c => (Guid?)c.Id).FirstOrDefaultAsync(ct);
 
     public async Task<Result<CustomerDetailsDto>> UpdateAsync(Guid id, SaveCustomerRequest request, CancellationToken ct)
     {

@@ -29,6 +29,7 @@ public static class DependencyInjection
         services.Configure<LicenseSigningOptions>(config.GetSection(LicenseSigningOptions.Section));
         services.Configure<SeedOptions>(config.GetSection(SeedOptions.Section));
         services.Configure<OutboxOptions>(config.GetSection(OutboxOptions.Section));
+        services.Configure<Application.Licensing.DeviceOfferOptions>(config.GetSection(Application.Licensing.DeviceOfferOptions.Section));
         services.Configure<JobsOptions>(config.GetSection(JobsOptions.Section));
 
         // ---- Persistence: SQL Server (ADR-001 amended: the platform runs on the customer's SQL Server). ----
@@ -45,6 +46,8 @@ public static class DependencyInjection
                 options.UseSqlServer(connectionString, sql => sql.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"));
         });
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
+        services.Configure<Messaging.ChangeFeedOptions>(config.GetSection(Messaging.ChangeFeedOptions.Section));
+        services.AddScoped<global::Licensing.Application.Integrations.IChangeFeed, Messaging.ChangeFeedReader>();
 
         // ---- Module adapters: what a module needs from other modules (ADR-015) ----
         services.AddScoped<ICatalogUsageReader, CatalogUsageReader>();
@@ -53,6 +56,7 @@ public static class DependencyInjection
         services.AddScoped<ICurrentUser, HttpCurrentUser>();
         services.AddScoped<TenantContext>();
         services.AddScoped<ITenantContext>(sp => sp.GetRequiredService<TenantContext>());
+        services.AddScoped<ITenantScope>(sp => sp.GetRequiredService<TenantContext>());
 
         // ---- Security ----
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();

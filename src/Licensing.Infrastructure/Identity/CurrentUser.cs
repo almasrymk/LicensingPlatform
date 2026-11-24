@@ -43,7 +43,7 @@ public sealed class HttpCurrentUser(IHttpContextAccessor accessor) : ICurrentUse
 /// tenant users → their tenant (and customer, for customer users); platform admins → all tenants, or one tenant
 /// they explicitly select with the X-Tenant-Id header; anonymous → nothing; background jobs → <see cref="RunAsSystem"/>.
 /// </summary>
-public sealed class TenantContext(ICurrentUser user, IHttpContextAccessor accessor) : ITenantContext
+public sealed class TenantContext(ICurrentUser user, IHttpContextAccessor accessor) : ITenantContext, ITenantScope
 {
     public const string TenantHeader = "X-Tenant-Id";
     private bool _system;

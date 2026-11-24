@@ -29,6 +29,33 @@ jobs:
       - name: Migrations apply cleanly
         run: dotnet tool install -g dotnet-ef && dotnet ef migrations has-pending-model-changes -p src/Licensing.Infrastructure -s src/Licensing.Api
 
+  # The SQL Server-only tests (migration backfills) skip under SQLite; this job runs the whole suite on SQL Server.
+  backend-sqlserver:
+    runs-on: ubuntu-latest
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          # Throw-away password of the CI-only SQL Server service container.
+          MSSQL_SA_PASSWORD: CI-ONLY-Sql-Pa55word!
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' || exit 1"
+          --health-interval 10s --health-timeout 5s --health-retries 12
+    env:
+      LICENSING_TEST_SQLSERVER: "1"
+      LICENSING_TEST_SQLSERVER_SERVER: Server=localhost,1433;User Id=sa;Password=CI-ONLY-Sql-Pa55word!;TrustServerCertificate=True
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet build -c Release
+      - name: All tests on SQL Server
+        run: dotnet test --no-build -c Release
+
   secrets-scan:
     runs-on: ubuntu-latest
     steps:

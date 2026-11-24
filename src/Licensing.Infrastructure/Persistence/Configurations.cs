@@ -63,6 +63,8 @@ internal sealed class CustomerConfig : IEntityTypeConfiguration<Customer>
         b.Property(x => x.Phone).HasMaxLength(50);
         b.Property(x => x.Country).HasMaxLength(100);
         b.Property(x => x.TaxNumber).HasMaxLength(50);
+        b.Property(x => x.ExternalReference).HasMaxLength(100);
+        b.HasIndex(x => new { x.TenantId, x.ExternalReference }).IsUnique().HasFilter("[ExternalReference] IS NOT NULL");
         b.HasMany(x => x.Contacts).WithOne().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Cascade);
         b.Navigation(x => x.Contacts).UsePropertyAccessMode(PropertyAccessMode.Field);
         b.Ignore(x => x.DomainEvents);
@@ -127,6 +129,8 @@ internal sealed class SubscriptionConfig : IEntityTypeConfiguration<Subscription
         b.HasIndex(x => new { x.Status, x.EndDate });
         b.Property(x => x.Version).IsConcurrencyToken();
         b.Property(x => x.Notes).HasMaxLength(1000);
+        b.Property(x => x.ExternalReference).HasMaxLength(100);
+        b.HasIndex(x => new { x.TenantId, x.ExternalReference }).IsUnique().HasFilter("[ExternalReference] IS NOT NULL");
         b.HasMany(x => x.History).WithOne().HasForeignKey(x => x.SubscriptionId).OnDelete(DeleteBehavior.Cascade);
         b.Navigation(x => x.History).UsePropertyAccessMode(PropertyAccessMode.Field);
         b.Ignore(x => x.DomainEvents);
@@ -139,6 +143,10 @@ internal sealed class SubscriptionHistoryConfig : IEntityTypeConfiguration<Subsc
     {
         b.ToTable("SubscriptionHistory", "subscriptions");
         b.Property(x => x.Details).HasMaxLength(500);
+        b.Property(x => x.Reference).HasMaxLength(100);
+        // The filtered index covers only rows with a reference, so the foreign key keeps its own index.
+        b.HasIndex(x => x.SubscriptionId);
+        b.HasIndex(x => new { x.SubscriptionId, x.Reference }).IsUnique().HasFilter("[Reference] IS NOT NULL");
     }
 }
 
@@ -177,6 +185,7 @@ internal sealed class LicenseActivationConfig : IEntityTypeConfiguration<License
         b.Property(x => x.AppVersion).HasMaxLength(50);
         b.Property(x => x.LastIpAddress).HasMaxLength(64);
         b.Property(x => x.OperatingSystem).HasMaxLength(100);
+        b.Property(x => x.CredentialHash).HasMaxLength(128);
     }
 }
 
@@ -190,6 +199,20 @@ internal sealed class ActivationAttemptConfig : IEntityTypeConfiguration<Activat
         b.Property(x => x.ProductKeyPrefix).HasMaxLength(16);
         b.Property(x => x.ErrorCode).HasMaxLength(64);
         b.Property(x => x.IpAddress).HasMaxLength(64);
+    }
+}
+
+internal sealed class TrialGrantConfig : IEntityTypeConfiguration<TrialGrant>
+{
+    public void Configure(EntityTypeBuilder<TrialGrant> b)
+    {
+        b.ToTable("TrialGrants", "licensing");
+        b.HasIndex(x => x.CodeHash).IsUnique();
+        b.HasIndex(x => new { x.TenantId, x.ProductId, x.Reference });
+        b.Property(x => x.CodeHash).HasMaxLength(128);
+        b.Property(x => x.Reference).HasMaxLength(TrialGrant.ReferenceMaxLength);
+        b.Property(x => x.RedeemedDeviceId).HasMaxLength(128);
+        b.HasOne<Product>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -278,6 +301,8 @@ internal sealed class OutboxConfig : IEntityTypeConfiguration<OutboxMessage>
     {
         b.ToTable("OutboxMessages", "messaging");
         b.HasIndex(x => new { x.ProcessedAt, x.DeadLettered, x.NextAttemptAt });
+        // INT-006: the integration change feed reads one tenant in (OccurredAt, Id) order.
+        b.HasIndex(x => new { x.TenantId, x.OccurredAt, x.Id });
         b.Property(x => x.Type).HasMaxLength(128);
         b.Property(x => x.Payload).HasMaxLength(-1);
         b.Property(x => x.LastError).HasMaxLength(2000);

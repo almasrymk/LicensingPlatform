@@ -77,6 +77,18 @@ public sealed class LicensingController(DeviceLicensingService licensing, IIdemp
         this.ToActionResult(await licensing.StartTrialAsync(request, ct));
 
     /// <summary>
+    /// B5: a single-use trial code for one of the website's signed-in customers (<c>reference</c>, one trial each). The
+    /// customer enters it in the Agent, which redeems it on <c>device/trial</c> without an API client. Shown only once.
+    /// </summary>
+    [HttpPost("trial-grants")]
+    [RequireScope(ApiScopes.TrialsGrant)]
+    public async Task<IActionResult> IssueTrialGrant(IssueTrialGrantRequest request, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        return this.ToActionResult(await licensing.IssueTrialGrantAsync(request, ct));
+    }
+
+    /// <summary>
     /// Gives this device the product's current free plan. The product key is in the response only this once; a device that
     /// already has its free license gets <c>LIC_FREE_USED</c>.
     /// </summary>

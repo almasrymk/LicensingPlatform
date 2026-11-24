@@ -174,7 +174,9 @@ public sealed class LicensesController(LicenseService licenses) : ControllerBase
 
     [HttpPost("{id:guid}/resume")]
     [HasPermission(Permissions.LicensesManage)]
-    public async Task<IActionResult> Resume(Guid id, CancellationToken ct) => this.ToActionResult(await licenses.ResumeAsync(id, ct));
+    public async Task<IActionResult> Resume(Guid id,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] LicenseActionRequest? request, CancellationToken ct) =>
+        this.ToActionResult(await licenses.ResumeAsync(id, ct, request?.ByCustomer ?? false));
 
     [HttpPost("{id:guid}/revoke")]
     [HasPermission(Permissions.LicensesManage)]
